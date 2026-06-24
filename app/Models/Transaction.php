@@ -27,6 +27,8 @@ class Transaction extends Model
         'metadata',
         'user_id',
         'status',
+        'due_date',
+        'paid_amount',
     ];
 
     /**
@@ -39,6 +41,8 @@ class Transaction extends Model
         return [
             'amount' => 'decimal:2',
             'transaction_date' => 'date',
+            'due_date' => 'date',
+            'paid_amount' => 'decimal:2',
             'metadata' => 'array',
         ];
     }

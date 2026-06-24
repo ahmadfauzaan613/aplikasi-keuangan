@@ -282,55 +282,54 @@ new class extends Component {
 
             <!-- Transactions Table Card -->
             <div class="bg-gray-900 rounded-2xl border border-gray-850 shadow-sm overflow-hidden">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
+                    <table class="w-full text-left border-collapse border border-gray-800">
                         <thead>
-                            <tr class="border-b border-gray-800 bg-black/50">
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{{ __('Transaksi') }}</th>
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{{ __('Tanggal') }}</th>
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{{ __('Kategori') }}</th>
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">{{ __('Jumlah') }}</th>
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider"></th>
+                            <tr class="bg-gray-900 border-b border-gray-855 text-xs text-white uppercase font-black tracking-wider">
+                                <th class="px-6 py-3 border border-gray-800">{{ __('Transaksi') }}</th>
+                                <th class="px-6 py-3 border border-gray-800">{{ __('Tanggal') }}</th>
+                                <th class="px-6 py-3 border border-gray-800">{{ __('Kategori') }}</th>
+                                <th class="px-6 py-3 border border-gray-800 text-right">{{ __('Jumlah') }}</th>
+                                <th class="px-6 py-3 border border-gray-800 text-center w-16">Aksi</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-800">
+                        <tbody class="divide-y divide-gray-800 bg-black/20">
                             @forelse($transactions as $trx)
-                                <tr class="hover:bg-gray-800/30 transition duration-150">
-                                    <td class="px-6 py-4">
+                                <tr class="hover:bg-gray-850/30 text-xs transition">
+                                    <td class="px-6 py-3 border border-gray-800">
                                         <div class="flex flex-col">
-                                            <span class="text-sm font-semibold text-gray-200">{{ $trx->title }}</span>
+                                            <span class="text-sm font-bold text-white">{{ $trx->title }}</span>
                                             @if($trx->description)
-                                                <span class="text-xs text-gray-500 mt-0.5 max-w-xs truncate">{{ $trx->description }}</span>
+                                                <span class="text-xs text-gray-300 mt-0.5 max-w-xs truncate">{{ $trx->description }}</span>
                                             @endif
                                         </div>
                                     </td>
-                                    <td class="px-6 py-4 text-sm text-gray-455 whitespace-nowrap">
+                                    <td class="px-6 py-3 text-xs text-gray-300 font-bold whitespace-nowrap border border-gray-800">
                                         {{ $trx->transaction_date->format('d M Y') }}
                                     </td>
-                                    <td class="px-6 py-4">
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-950/40 text-indigo-400 border border-indigo-900/40">
+                                    <td class="px-6 py-3 border border-gray-800">
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-indigo-950/40 text-indigo-400 border border-indigo-900/40">
                                             {{ $trx->category }}
                                         </span>
                                     </td>
-                                    <td class="px-6 py-4 text-right whitespace-nowrap">
-                                        <span class="text-sm font-bold {{ $trx->type === 'income' ? 'text-emerald-400' : 'text-rose-400' }}">
+                                    <td class="px-6 py-3 text-right whitespace-nowrap border border-gray-800">
+                                        <span class="font-black {{ $trx->type === 'income' ? 'text-emerald-400' : 'text-rose-500' }}">
                                             {{ $trx->type === 'income' ? '+' : '-' }} Rp {{ number_format($trx->amount, 0, ',', '.') }}
                                         </span>
                                     </td>
-                                    <td class="px-6 py-4 text-right">
+                                    <td class="px-6 py-3 text-center whitespace-nowrap border border-gray-800 w-16">
                                         <button type="button"
                                                 @click="$dispatch('open-confirm-modal', { id: '{{ $trx->id }}', action: 'delete' })" 
-                                                class="text-gray-555 hover:text-rose-450 transition-colors p-1.5 rounded-lg hover:bg-rose-955/20">
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                                class="text-gray-455 hover:text-rose-455 transition-colors p-1.5 rounded-lg hover:bg-rose-955/20 cursor-pointer">
+                                            <svg class="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                         </button>
                                     </td>
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="5" class="px-6 py-8 text-center text-gray-500">
+                                    <td colspan="5" class="px-6 py-8 text-center text-gray-550 border border-gray-800">
                                         <svg class="w-12 h-12 mx-auto mb-3 opacity-30 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                                        <p class="text-sm font-semibold">{{ __('Tidak ada transaksi ditemukan') }}</p>
-                                        <p class="text-xs mt-1">{{ __('Coba sesuaikan pencarian atau filter Anda.') }}</p>
+                                        <p class="text-sm font-semibold text-gray-400">{{ __('Tidak ada transaksi ditemukan') }}</p>
+                                        <p class="text-xs mt-1 text-gray-500">{{ __('Coba sesuaikan pencarian atau filter Anda.') }}</p>
                                     </td>
                                 </tr>
                             @endforelse

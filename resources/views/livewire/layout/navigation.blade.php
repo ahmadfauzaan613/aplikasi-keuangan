@@ -75,7 +75,7 @@ new class extends Component
                 </div>
                 <div class="ml-3 min-w-0">
                     <p class="text-sm font-bold text-gray-200 truncate">{{ auth()->user()->name }}</p>
-                    <p class="text-xs text-gray-550 truncate">@{{ auth()->user()->username }}</p>
+                    <p class="text-xs text-gray-550 truncate">{{ auth()->user()->username }}</p>
                 </div>
             </div>
             <button wire:click="logout" 
@@ -171,7 +171,7 @@ new class extends Component
                 </div>
                 <div class="ml-3 min-w-0">
                     <p class="text-sm font-bold text-gray-200 truncate">{{ auth()->user()->name }}</p>
-                    <p class="text-xs text-gray-500 truncate">@{{ auth()->user()->username }}</p>
+                    <p class="text-xs text-gray-500 truncate">{{ auth()->user()->username }}</p>
                 </div>
             </div>
             <button wire:click="logout" 

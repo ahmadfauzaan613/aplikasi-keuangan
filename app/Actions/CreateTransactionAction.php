@@ -19,7 +19,9 @@ class CreateTransactionAction
      *     description?: string|null,
      *     transaction_date: string,
      *     metadata?: array|null,
-     *     status?: string
+     *     status?: string,
+     *     due_date?: string|null,
+     *     paid_amount?: float|numeric
      * } $data
      */
     public function execute(User $user, array $data): Transaction
@@ -34,6 +36,8 @@ class CreateTransactionAction
                 'transaction_date' => $data['transaction_date'],
                 'metadata' => $data['metadata'] ?? [],
                 'status' => $data['status'] ?? 'sudah',
+                'due_date' => $data['due_date'] ?? null,
+                'paid_amount' => $data['paid_amount'] ?? 0.00,
             ]);
         });
     }

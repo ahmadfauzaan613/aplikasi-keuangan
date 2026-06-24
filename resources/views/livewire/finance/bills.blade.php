@@ -14,19 +14,28 @@ new class extends Component {
     public string $category = 'Utilitas/Tagihan';
     public string $status = 'belum'; // Default belum
     public string $description = '';
+    public string $due_date = '';
+    public string $paid_amount = '';
     
     // Add Form Date selections
     public int $formMonth = 1;
     public int $formYear = 2026;
 
-    // Filter Year
+    // Filter Year & Month
     public int $selectedYear = 2026;
+    public int $activeMonth = 1;
+
+    // Editing state
+    public ?string $editingId = null;
 
     public function mount(): void
     {
-        $this->selectedYear = now()->year;
-        $this->formYear = now()->year;
-        $this->formMonth = now()->month;
+        $nowIndo = now('Asia/Jakarta');
+        $this->selectedYear = $nowIndo->year;
+        $this->formYear = $nowIndo->year;
+        $this->formMonth = $nowIndo->month;
+        $this->activeMonth = $nowIndo->month;
+        $this->due_date = $nowIndo->format('Y-m-d');
     }
 
     public function getYearsProperty(): array
@@ -39,7 +48,6 @@ new class extends Component {
             $years[] = $y;
         }
         
-        // Add next year if we are in December
         if (now()->month === 12) {
             $years[] = max($startYear, $currentYear) + 1;
         }
@@ -67,9 +75,32 @@ new class extends Component {
 
     public function selectMonthForForm(int $month): void
     {
+        $this->editingId = null;
+        $this->reset(['amount', 'description', 'paid_amount']);
         $this->formMonth = $month;
         $this->formYear = $this->selectedYear;
-        $this->title = 'Tagihan - ' . $this->months[$month];
+        $this->title = 'Tagihan Tetap';
+        $this->status = 'belum';
+    }
+
+    public function setActiveMonth(int $month): void
+    {
+        $this->activeMonth = $month;
+        $this->selectMonthForForm($month);
+    }
+
+    public function edit(string $id): void
+    {
+        $transaction = auth()->user()->transactions()->findOrFail($id);
+        $this->editingId = $transaction->id;
+        $this->title = $transaction->title;
+        $this->amount = (string) $transaction->amount;
+        $this->paid_amount = (string) $transaction->paid_amount;
+        $this->status = $transaction->status;
+        $this->description = $transaction->description ?: '';
+        $this->formMonth = Carbon::parse($transaction->transaction_date)->month;
+        $this->formYear = Carbon::parse($transaction->transaction_date)->year;
+        $this->category = $transaction->category;
     }
 
     public function save(CreateTransactionAction $createAction): void
@@ -82,46 +113,83 @@ new class extends Component {
             'formMonth' => 'required|integer|between:1,12',
             'formYear' => 'required|integer',
             'status' => 'required|in:sudah,belum',
+            'paid_amount' => 'nullable|numeric|min:0',
         ]);
 
-        // Fix date on the 1st of the selected month/year
+        $paidAmountVal = (float) ($this->status === 'sudah' ? $this->amount : ($this->paid_amount ?: 0));
         $date = Carbon::create($this->formYear, $this->formMonth, 1)->format('Y-m-d');
 
-        $createAction->execute(auth()->user(), [
-            'title' => $this->title,
-            'amount' => (float) $this->amount,
-            'type' => 'expense',
-            'category' => $this->category,
-            'description' => $this->description ?: null,
-            'transaction_date' => $date,
-            'status' => $this->status,
-        ]);
+        if ($this->editingId) {
+            $transaction = auth()->user()->transactions()->findOrFail($this->editingId);
+            $transaction->update([
+                'title' => $this->title,
+                'amount' => (float) $this->amount,
+                'paid_amount' => $paidAmountVal,
+                'status' => $this->status,
+                'category' => $this->category,
+                'description' => $this->description ?: null,
+                'transaction_date' => $date,
+            ]);
+            $this->editingId = null;
+            session()->flash('message', 'Tagihan bulanan berhasil diperbarui!');
+        } else {
+            $createAction->execute(auth()->user(), [
+                'title' => $this->title,
+                'amount' => (float) $this->amount,
+                'type' => 'expense',
+                'category' => $this->category,
+                'description' => $this->description ?: null,
+                'transaction_date' => $date,
+                'status' => $this->status,
+                'paid_amount' => $paidAmountVal,
+            ]);
+            session()->flash('message', 'Tagihan bulanan berhasil dicatat!');
+        }
 
-        $this->reset(['amount', 'description']);
+        $this->reset(['amount', 'description', 'paid_amount']);
         $this->title = 'Tagihan Tetap';
-
-        session()->flash('message', 'Tagihan bulanan berhasil dicatat!');
+        $this->dispatch('close-modal');
     }
 
     public function updateStatus(string $id, string $newStatus): void
     {
         $transaction = auth()->user()->transactions()->findOrFail($id);
-        $transaction->update(['status' => $newStatus]);
+        $transaction->update([
+            'status' => $newStatus,
+            'paid_amount' => $newStatus === 'sudah' ? $transaction->amount : $transaction->paid_amount,
+        ]);
 
         session()->flash('message', 'Status pembayaran tagihan berhasil diperbarui!');
     }
 
-    public function delete(string $id, DeleteTransactionAction $deleteAction): void
+    public function updatePaidAmount(string $id, $amount): void
+    {
+        $paidAmount = max(0, (float) $amount);
+        $transaction = auth()->user()->transactions()->findOrFail($id);
+        
+        $status = $transaction->status;
+        if ($paidAmount >= $transaction->amount) {
+            $status = 'sudah';
+        } else if ($transaction->status === 'sudah' && $paidAmount < $transaction->amount) {
+            $status = 'belum';
+        }
+
+        $transaction->update([
+            'paid_amount' => $paidAmount,
+            'status' => $status,
+        ]);
+
+        session()->flash('message', 'Jumlah terbayar berhasil diperbarui!');
+    }
+
+    public function delete(string $id): void
     {
         $transaction = auth()->user()->transactions()->findOrFail($id);
-        $deleteAction->execute($transaction);
+        $transaction->delete();
 
         session()->flash('message', 'Catatan tagihan berhasil dihapus!');
     }
 
-    /**
-     * Get monthly expenses grouped by month index for the selected year.
-     */
     public function getMonthlyDataProperty(): array
     {
         $expenses = auth()->user()->transactions()
@@ -137,19 +205,37 @@ new class extends Component {
         return $data;
     }
 
-    /**
-     * Get monthly incomes for the selected year.
-     */
-    public function getMonthlyIncomesProperty(): array
+    public function getMonthlySalariesProperty(): array
     {
+        $data = [];
+        
         $incomes = auth()->user()->transactions()
             ->income()
-            ->whereYear('transaction_date', $this->selectedYear)
+            ->where(function ($query) {
+                $query->whereYear('transaction_date', $this->selectedYear)
+                    ->orWhereYear('transaction_date', $this->selectedYear - 1);
+            })
             ->get();
 
-        $data = [];
         for ($m = 1; $m <= 12; $m++) {
-            $data[$m] = $incomes->filter(fn($trx) => Carbon::parse($trx->transaction_date)->month === $m)->sum('amount');
+            if ($m === 1) {
+                $prevMonth = 12;
+                $prevYear = $this->selectedYear - 1;
+            } else {
+                $prevMonth = $m - 1;
+                $prevYear = $this->selectedYear;
+            }
+
+            $salaryAmount = $incomes->filter(function ($trx) use ($prevMonth, $prevYear) {
+                $date = Carbon::parse($trx->transaction_date);
+                return $date->month === $prevMonth && $date->year === $prevYear;
+            })->sum('amount');
+
+            $data[$m] = [
+                'amount' => $salaryAmount,
+                'month_name' => $this->months[$prevMonth],
+                'year' => $prevYear
+            ];
         }
 
         return $data;
@@ -157,15 +243,39 @@ new class extends Component {
 
     public function getStatsProperty(): array
     {
-        $query = auth()->user()->transactions()->expense()->whereYear('transaction_date', $this->selectedYear);
+        $expenses = auth()->user()->transactions()
+            ->expense()
+            ->whereYear('transaction_date', $this->selectedYear)
+            ->get();
 
-        $totalPaid = (clone $query)->paid()->sum('amount');
-        $totalUnpaid = (clone $query)->unpaid()->sum('amount');
+        $totalPaid = 0;
+        $totalUnpaid = 0;
+
+        foreach ($expenses as $item) {
+            if ($item->status === 'sudah') {
+                $totalPaid += $item->amount;
+            } else {
+                $totalPaid += $item->paid_amount;
+                $totalUnpaid += max(0, $item->amount - $item->paid_amount);
+            }
+        }
 
         return [
             'paid' => $totalPaid,
             'unpaid' => $totalUnpaid,
             'total' => $totalPaid + $totalUnpaid,
+        ];
+    }
+
+    public function getActiveMonthStatsProperty(): array
+    {
+        $total = 0;
+        $items = $this->monthlyData[$this->activeMonth] ?? [];
+        foreach ($items as $item) {
+            $total += $item->amount;
+        }
+        return [
+            'total' => $total,
         ];
     }
 
@@ -178,16 +288,17 @@ new class extends Component {
     {
         return [
             'monthlyData' => $this->monthlyData,
-            'monthlyIncomes' => $this->monthlyIncomes,
+            'monthlySalaries' => $this->monthlySalaries,
             'years' => $this->years,
             'months' => $this->months,
             'stats' => $this->stats,
+            'activeMonthStats' => $this->activeMonthStats,
             'categories' => $this->getCategories(),
         ];
     }
 }; ?>
 
-<div class="space-y-8" x-data>
+<div class="space-y-8" x-data="{ showFormModal: false }" @close-modal.window="showFormModal = false">
     @if (session()->has('message'))
         <div x-data="{ show: true }" x-show="show" 
              x-transition:enter="transition ease-out duration-300" 
@@ -214,261 +325,202 @@ new class extends Component {
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gray-900 p-6 rounded-2xl border border-gray-850 shadow-sm">
         <div>
             <h3 class="text-lg font-bold text-gray-250 mb-1 flex items-center">
-                <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
                 Berkas Tagihan & Bayaran Tahunan
             </h3>
-            <p class="text-xs text-gray-550">Menampilkan rekapan tagihan bulanan wajib.</p>
-        </div>
-
-        <div class="flex items-center gap-3">
-            <span class="text-sm font-semibold text-gray-400">Berkas Tahun:</span>
-            <div class="relative inline-block text-left">
-                <select wire:model.live="selectedYear" 
-                        class="py-2 pl-9 pr-10 bg-black border border-gray-850 rounded-xl focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-gray-200 text-sm font-bold appearance-none cursor-pointer">
-                    @foreach($years as $yr)
-                        <option value="{{ $yr }}">{{ $yr }}</option>
-                    @endforeach
-                </select>
-                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-indigo-500">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-                </div>
-                <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-500">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
-                </div>
-            </div>
+            <p class="text-xs text-gray-550">Menampilkan rekapan tagihan bulanan wajib (Statik).</p>
         </div>
     </div>
 
     <!-- Stats Cards Summary -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-sm">
-            <p class="text-gray-500 text-xs font-semibold uppercase tracking-wider">Total Tagihan {{ $selectedYear }}</p>
-            <h4 class="text-xl font-bold text-gray-200 mt-1">
-                Rp {{ number_format($stats['total'], 2, ',', '.') }}
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition">
+            <p class="text-indigo-300 text-xs font-extrabold uppercase tracking-wider">Tagihan {{ $months[$activeMonth] }}</p>
+            <h4 class="text-2xl font-extrabold text-indigo-300 mt-1.5">
+                Rp {{ number_format($activeMonthStats['total'], 0, ',', '.') }}
             </h4>
         </div>
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-sm">
-            <p class="text-gray-500 text-xs font-semibold uppercase tracking-wider">Sudah Dibayar</p>
-            <h4 class="text-xl font-bold text-emerald-450 mt-1">
-                Rp {{ number_format($stats['paid'], 2, ',', '.') }}
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition">
+            <p class="text-emerald-300 text-xs font-extrabold uppercase tracking-wider">Sudah Dibayar</p>
+            <h4 class="text-2xl font-extrabold text-emerald-400 mt-1.5">
+                Rp {{ number_format($stats['paid'], 0, ',', '.') }}
             </h4>
         </div>
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-sm">
-            <p class="text-gray-500 text-xs font-semibold uppercase tracking-wider">Belum Dibayar</p>
-            <h4 class="text-xl font-bold text-rose-455 mt-1">
-                Rp {{ number_format($stats['unpaid'], 2, ',', '.') }}
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition">
+            <p class="text-rose-300 text-xs font-extrabold uppercase tracking-wider">Belum Dibayar</p>
+            <h4 class="text-2xl font-extrabold text-rose-500 mt-1.5">
+                Rp {{ number_format($stats['unpaid'], 0, ',', '.') }}
             </h4>
         </div>
     </div>
 
-    <!-- Main Grid Content -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        <!-- 12 Months Ledger Column -->
-        <div class="lg:col-span-2 space-y-6">
-            <h3 class="text-base font-bold text-gray-300 flex items-center">
-                <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-                Arsip Tagihan Bulanan ({{ $selectedYear }})
-            </h3>
-            
-            <div class="bg-gray-900 rounded-2xl border border-gray-850 shadow-sm overflow-hidden" x-data="{ expandedMonth: {{ now()->month }} }">
+    <!-- Filter Navigation Bar (Sticky) -->
+    <div class="sticky top-4 z-30 bg-gray-900/95 backdrop-blur-md border border-gray-850 p-4 rounded-2xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-center gap-2 text-indigo-400 font-bold text-sm pl-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+            <span>Arsip & Filter Tagihan</span>
+        </div>
+        <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+            <!-- Month Selector Dropdown -->
+            <div class="flex items-center gap-2.5">
+                <span class="text-xs font-semibold text-gray-400">Pilih Bulan:</span>
+                <div class="relative inline-block text-left">
+                    <select wire:change="setActiveMonth($event.target.value)" 
+                            class="py-2 pl-3 pr-10 bg-black border border-gray-850 rounded-xl focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-gray-200 text-xs font-bold appearance-none cursor-pointer">
+                        @foreach($months as $monthIdx => $monthName)
+                            <option value="{{ $monthIdx }}" {{ $activeMonth === $monthIdx ? 'selected' : '' }}>{{ $monthName }}</option>
+                        @endforeach
+                    </select>
+                    <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-500">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Year Selector Dropdown (Berkas Tahun) -->
+            <div class="flex items-center gap-2.5">
+                <span class="text-xs font-semibold text-gray-400">Berkas Tahun:</span>
+                <div class="relative inline-block text-left">
+                    <select wire:model.live="selectedYear" 
+                            class="py-2 pl-3 pr-10 bg-black border border-gray-850 rounded-xl focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-gray-200 text-xs font-bold appearance-none cursor-pointer">
+                        @foreach($years as $yr)
+                            <option value="{{ $yr }}">{{ $yr }}</option>
+                        @endforeach
+                    </select>
+                    <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-500">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Ledger Content (Full Width) -->
+    <div class="w-full space-y-6">
+        @foreach($months as $monthIdx => $monthName)
+            @if($monthIdx === $activeMonth)
+                @php
+                    $monthItems = $monthlyData[$monthIdx];
+                @endphp
+                <div id="month-card-{{ $monthIdx }}" class="scroll-mt-24 bg-gray-900 rounded-2xl border border-gray-850 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 bg-black/40 border-b border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="flex items-center gap-2">
+                        <span class="text-base font-black text-white">{{ $monthName }}</span>
+                        <span class="text-xs font-extrabold text-indigo-400">({{ count($monthItems) }} Tagihan)</span>
+                    </div>
+                    <div class="flex items-center gap-4 text-xs">
+                        <span class="text-gray-250 font-extrabold">
+                            Gaji {{ $monthlySalaries[$monthIdx]['month_name'] }}: 
+                            <span class="ml-1 text-emerald-400 font-black text-sm bg-emerald-950/40 px-2 py-0.5 border border-emerald-900/30 rounded-lg">Rp {{ number_format($monthlySalaries[$monthIdx]['amount'], 0, ',', '.') }}</span>
+                        </span>
+                        <button type="button" wire:click="selectMonthForForm({{ $monthIdx }})" 
+                                @click="showFormModal = true"
+                                class="py-1.5 px-3 bg-indigo-650 hover:bg-indigo-600 text-white text-xs font-black rounded-xl transition active:scale-[0.98] flex items-center gap-1 shadow-md shadow-indigo-900/20 cursor-pointer">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+                            Catat Tagihan
+                        </button>
+                    </div>
+                </div>
+                
                 <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse border border-gray-800">
                         <thead>
-                            <tr class="bg-gray-900 border-b border-gray-800 text-xs text-gray-350 uppercase font-bold">
-                                <th class="px-4 py-3 border border-gray-800">Bulan / Nama Tagihan</th>
-                                <th class="px-4 py-3 border border-gray-800 text-right">Jumlah (Rupiah)</th>
-                                <th class="px-4 py-3 border border-gray-800 text-center">Tahun</th>
-                                <th class="px-4 py-3 border border-gray-800 text-center">Status</th>
-                                <th class="px-4 py-3 border border-gray-800">Keterangan / Rincian</th>
-                                <th class="px-4 py-3 border border-gray-800 text-center">Aksi</th>
+                            <tr class="bg-gray-900 border-b border-gray-855 text-xs text-white uppercase font-black tracking-wider">
+                                <th class="px-6 py-3 border border-gray-800">Bayaran</th>
+                                <th class="px-6 py-3 border border-gray-800 text-center w-32">Status</th>
+                                <th class="px-6 py-3 border border-gray-800 text-right w-44">Nominal</th>
+                                <th class="px-6 py-3 border border-gray-800 text-right w-52">Nominal yang sudah dibayar</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            @foreach($months as $monthIdx => $monthName)
-                                @php
-                                    $monthItems = $monthlyData[$monthIdx];
-                                    $monthTotal = $monthItems->sum('amount');
-                                    $monthIncome = $monthlyIncomes[$monthIdx] ?? 0;
-                                    $netRemaining = $monthIncome - $monthTotal;
-                                @endphp
-                                
-                                <!-- Month Summary Row -->
-                                <tr class="bg-black/50 border-y border-gray-800 hover:bg-gray-800/10 cursor-pointer text-xs transition-colors"
-                                    @click="expandedMonth = (expandedMonth === {{ $monthIdx }} ? null : {{ $monthIdx }})">
-                                    <td class="px-4 py-3 font-extrabold text-gray-200 flex items-center gap-2">
-                                        <svg class="w-3.5 h-3.5 text-gray-500 transition-transform duration-200" 
-                                             :class="expandedMonth === {{ $monthIdx }} ? 'rotate-90' : ''" 
-                                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7-7"/>
-                                        </svg>
-                                        {{ $monthName }}
-                                        <span class="text-[10px] text-gray-500 font-normal uppercase tracking-wider">({{ $monthItems->count() }} Tagihan)</span>
-                                    </td>
-                                    <td class="px-4 py-3 text-right font-mono font-black text-rose-455">
-                                        Rp {{ number_format($monthTotal, 0, ',', '.') }}
-                                    </td>
-                                    <td class="px-4 py-3 text-center text-gray-500 font-bold">{{ $selectedYear }}</td>
-                                    <td class="px-4 py-3 text-center text-xs">
-                                        @if($monthTotal > 0)
-                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold {{ $monthItems->where('status', 'belum')->count() > 0 ? 'bg-amber-900/20 text-amber-400 border border-amber-800/40' : 'bg-emerald-900/20 text-emerald-450 border border-emerald-800/40' }}">
-                                                {{ $monthItems->where('status', 'belum')->count() > 0 ? 'Ada Belum Dibayar' : 'Lunas Semua' }}
-                                            </span>
-                                        @else
-                                            <span class="text-xs text-gray-600 italic">Belum Ada</span>
-                                        @endif
-                                    </td>
-                                    <td class="px-4 py-3 text-[10px] text-gray-500 truncate max-w-xs">
-                                        <span>Gaji: Rp {{ number_format($monthIncome, 0, ',', '.') }} | Sisa: <span class="{{ $netRemaining >= 0 ? 'text-indigo-400' : 'text-rose-500' }} font-bold">Rp {{ number_format($netRemaining, 0, ',', '.') }}</span></span>
-                                    </td>
-                                    <td class="px-4 py-3 text-center">
-                                        <!-- Open indicator -->
-                                    </td>
-                                </tr>
-
-                                <!-- Item Rows under this Month -->
-                                @forelse($monthItems as $item)
-                                    <tr x-show="expandedMonth === {{ $monthIdx }}" 
-                                        x-transition.opacity 
-                                        class="hover:bg-gray-800/20 text-xs transition border-b border-gray-800 bg-black/10">
-                                        <td class="px-8 py-2.5 font-semibold text-gray-300 pl-8">
-                                            {{ $item->title }}
+                        <tbody class="divide-y divide-gray-800 bg-black/20">
+                            @if(count($monthItems) > 0)
+                                @foreach($monthItems as $item)
+                                    <tr class="hover:bg-gray-850/30 text-xs transition group">
+                                        <!-- Bayaran -->
+                                        <td class="px-6 py-3 font-bold text-white border border-gray-800">
+                                            <div class="flex items-center justify-between">
+                                                <span>{{ $item->title }}</span>
+                                                <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all ml-2">
+                                                    <button type="button" 
+                                                            wire:click="edit('{{ $item->id }}')" 
+                                                            @click="showFormModal = true"
+                                                            class="text-gray-450 hover:text-indigo-400 p-0.5 rounded transition-all cursor-pointer"
+                                                            title="Edit tagihan">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                                                    </button>
+                                                    <button type="button" 
+                                                            wire:click="delete('{{ $item->id }}')" 
+                                                            class="text-gray-450 hover:text-rose-455 p-0.5 rounded transition-all cursor-pointer"
+                                                            title="Hapus tagihan">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </td>
-                                        <td class="px-4 py-2.5 text-right font-mono font-bold text-rose-455 border-r border-gray-800/40">
-                                            Rp {{ number_format($item->amount, 0, ',', '.') }}
-                                        </td>
-                                        <td class="px-4 py-2.5 text-center text-gray-400 font-bold border-r border-gray-800/40">
-                                            {{ $selectedYear }}
-                                        </td>
-                                        <td class="px-4 py-2.5 text-center border-r border-gray-800/40">
+                                        <!-- Status -->
+                                        <td class="px-6 py-3 text-center border border-gray-800 w-32">
                                             <select wire:change="updateStatus('{{ $item->id }}', $event.target.value)" 
-                                                    class="bg-transparent border-0 text-xs font-bold p-0.5 focus:ring-0 focus:outline-none cursor-pointer w-full text-center {{ $item->status === 'sudah' ? 'text-emerald-400' : 'text-rose-400' }}">
-                                                <option value="belum" class="bg-gray-900 text-rose-400 font-semibold" {{ $item->status === 'belum' ? 'selected' : '' }}>Belum Dibayar</option>
-                                                <option value="sudah" class="bg-gray-900 text-emerald-400 font-semibold" {{ $item->status === 'sudah' ? 'selected' : '' }}>Sudah Dibayar</option>
+                                                    class="bg-transparent border-0 text-xs font-black p-0.5 focus:ring-0 focus:outline-none cursor-pointer w-full text-center {{ $item->status === 'sudah' ? 'text-emerald-400' : 'text-rose-500' }}">
+                                                <option value="belum" class="bg-gray-900 text-rose-500 font-semibold" {{ $item->status === 'belum' ? 'selected' : '' }}>Belum</option>
+                                                <option value="sudah" class="bg-gray-900 text-emerald-400 font-semibold" {{ $item->status === 'sudah' ? 'selected' : '' }}>Bayar</option>
                                             </select>
                                         </td>
-                                        <td class="px-4 py-2.5 text-gray-450 border-r border-gray-800/40 truncate max-w-xs">
-                                            {{ $item->description ?: '-' }}
+                                        <!-- Nominal -->
+                                        <td class="px-6 py-3 text-right font-black text-rose-455 border border-gray-800 whitespace-nowrap w-44">
+                                            Rp {{ number_format($item->amount, 0, ',', '.') }}
                                         </td>
-                                        <td class="px-4 py-2.5 text-center">
-                                            <button type="button" 
-                                                    @click="$dispatch('open-confirm-modal', { id: '{{ $item->id }}', action: 'delete' })" 
-                                                    class="text-gray-555 hover:text-rose-400 p-1 rounded transition-all">
-                                                <svg class="w-3.5 h-3.5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                @empty
-                                    <tr x-show="expandedMonth === {{ $monthIdx }}" 
-                                        class="text-xs text-gray-500 bg-gray-950/20 hover:bg-gray-800/10 transition border-b border-gray-800">
-                                        <td colspan="6" class="px-8 py-3 text-center italic text-gray-600 bg-black/10">
-                                            Belum ada tagihan dicatat untuk bulan ini.
+                                        <!-- Nominal yang sudah dibayar -->
+                                        <td class="px-6 py-3 border border-gray-800 whitespace-nowrap w-52">
+                                            <div class="relative flex items-center justify-end">
+                                                <span class="absolute left-2 text-gray-300 text-[10px]">Rp</span>
+                                                <input type="number" 
+                                                       value="{{ (float) $item->paid_amount }}" 
+                                                       wire:blur="updatePaidAmount('{{ $item->id }}', $event.target.value)"
+                                                       wire:keydown.enter="updatePaidAmount('{{ $item->id }}', $event.target.value)"
+                                                       class="pl-6 pr-1 w-32 bg-black/60 border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg text-xs font-black text-white text-right py-1 px-1.5" />
+                                            </div>
                                         </td>
                                     </tr>
-                                @endforelse
-                            @endforeach
+                                @endforeach
+                                <!-- Bottom Row: Total -->
+                                @php
+                                    $monthTotalAmount = collect($monthItems)->sum('amount');
+                                    $monthTotalPaid = collect($monthItems)->sum('paid_amount');
+                                    $monthTotalUnpaid = max(0, $monthTotalAmount - $monthTotalPaid);
+                                @endphp
+                                <tr class="bg-indigo-950/30 text-xs font-black border-t-2 border-gray-800">
+                                    <td class="px-6 py-3.5 text-indigo-300 font-extrabold border border-gray-800">
+                                        Total Bulan Ini
+                                    </td>
+                                    <td class="px-6 py-3.5 text-center font-extrabold border border-gray-800 {{ $monthTotalUnpaid > 0 ? 'text-rose-400' : 'text-emerald-400' }}">
+                                        {{ $monthTotalUnpaid > 0 ? 'Sisa: Rp ' . number_format($monthTotalUnpaid, 0, ',', '.') : 'Lunas' }}
+                                    </td>
+                                    <td class="px-6 py-3.5 text-right text-rose-400 border border-gray-800">
+                                        Rp {{ number_format($monthTotalAmount, 0, ',', '.') }}
+                                    </td>
+                                    <td class="px-6 py-3.5 text-right text-emerald-400 border border-gray-800">
+                                        Rp {{ number_format($monthTotalPaid, 0, ',', '.') }}
+                                    </td>
+                                </tr>
+                            @else
+                                <tr class="text-xs text-gray-550 hover:bg-gray-850/10 transition">
+                                    <td colspan="4" class="px-6 py-6 text-center italic text-gray-400 border border-gray-800">
+                                        - Belum ada tagihan untuk bulan {{ $monthName }} -
+                                    </td>
+                                </tr>
+                            @endif
                         </tbody>
                     </table>
                 </div>
             </div>
-        </div>
-
-        <!-- Add Form Column -->
-        <div class="space-y-6">
-            <div class="bg-gray-900 p-6 rounded-2xl border border-gray-850 shadow-sm">
-                <h3 class="text-lg font-bold text-gray-250 mb-6 flex items-center">
-                    <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    Catat Tagihan
-                </h3>
-
-                <form wire:submit="save" class="space-y-4">
-                    <!-- Year Selection -->
-                    <div>
-                        <label for="form_year" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tahun</label>
-                        <select wire:model="formYear" id="form_year" 
-                                class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100 font-semibold">
-                            @foreach($years as $yr)
-                                <option value="{{ $yr }}">{{ $yr }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-
-                    <!-- Month Selection -->
-                    <div>
-                        <label for="form_month" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Bulan</label>
-                        <select wire:model="formMonth" id="form_month" 
-                                class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100 font-semibold">
-                            @foreach($months as $idx => $name)
-                                <option value="{{ $idx }}">{{ $name }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-
-                    <!-- Title -->
-                    <div>
-                        <label for="trx_title" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nama Tagihan</label>
-                        <input wire:model="title" type="text" id="trx_title" placeholder="cth: Listrik PLN, Kos Bulanan, WiFi"
-                               class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
-                        @error('title') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                    </div>
-
-                    <!-- Amount -->
-                    <div>
-                        <label for="trx_amount" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Jumlah (Rupiah)</label>
-                        <div class="relative">
-                            <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-500 text-sm font-semibold">Rp</span>
-                            <input wire:model="amount" type="number" id="trx_amount" placeholder="0" step="0.01" min="0.01"
-                                   class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
-                        </div>
-                        @error('amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                    </div>
-
-                    <!-- Category -->
-                    <div>
-                        <label for="trx_category" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Kategori</label>
-                        <select wire:model="category" id="trx_category" 
-                                class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100 font-semibold">
-                            @foreach($categories as $cat)
-                                <option value="{{ $cat }}">{{ $cat }}</option>
-                            @endforeach
-                        </select>
-                        @error('category') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                    </div>
-
-                    <!-- Status Dropdown -->
-                    <div>
-                        <label for="form_status" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Status Pembayaran</label>
-                        <select wire:model="status" id="form_status" 
-                                class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100 font-semibold">
-                            <option value="belum">Belum Dibayar</option>
-                            <option value="sudah">Lunas / Sudah Dibayar</option>
-                        </select>
-                        @error('status') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                    </div>
-
-                    <!-- Description -->
-                    <div>
-                        <label for="trx_desc" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Keterangan (Opsional)</label>
-                        <textarea wire:model="description" id="trx_desc" placeholder="Catatan tambahan..." rows="2"
-                                  class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100"></textarea>
-                        @error('description') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                    </div>
-
-                    <!-- Submit Button -->
-                    <button type="submit" 
-                            class="w-full py-3 bg-indigo-600 hover:bg-indigo-750 text-white text-sm font-bold rounded-xl shadow-md transition-all duration-150 active:scale-[0.98]">
-                        Simpan Tagihan
-                    </button>
-                </form>
-            </div>
-        </div>
+            @endif
+        @endforeach
     </div>
 
-    <!-- Custom Confirmation Modal -->
-    <div x-data="{ openConfirm: false, deleteId: null, confirmAction: null }"
-         @open-confirm-modal.window="deleteId = $event.detail.id; confirmAction = $event.detail.action; openConfirm = true"
-         class="relative z-50"
-         x-show="openConfirm"
+    <!-- Form Modal (Catat Tagihan Popup) -->
+    <div class="relative z-40" 
+         x-show="showFormModal" 
+         @close-modal.window="showFormModal = false"
          style="display: none;">
         <!-- Backdrop -->
         <div class="fixed inset-0 bg-black/75 backdrop-blur-sm transition-opacity"></div>
@@ -476,28 +528,109 @@ new class extends Component {
         <!-- Modal Container -->
         <div class="fixed inset-0 z-50 overflow-y-auto">
             <div class="flex min-h-full items-center justify-center p-4 text-center">
-                <div class="relative transform overflow-hidden rounded-2xl bg-gray-900 border border-gray-850 p-6 text-left shadow-xl transition-all w-full max-w-md animate-fade-in"
-                     @click.away="openConfirm = false">
-                    <div class="flex items-center gap-4 text-rose-500 mb-4">
-                        <div class="p-3 bg-rose-955/50 rounded-xl border border-rose-900/30">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                <div class="relative transform overflow-hidden rounded-2xl bg-gray-900 border border-gray-850 p-6 text-left shadow-2xl transition-all w-full max-w-lg"
+                     @click.away="showFormModal = false">
+                    
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="text-lg font-bold text-gray-250 flex items-center">
+                            <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            {{ $editingId ? 'Edit Detail Tagihan' : 'Catat Tagihan / Bayaran Bulanan' }}
+                        </h3>
+                        <button type="button" @click="showFormModal = false" class="text-gray-555 hover:text-gray-350">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+
+                    <form wire:submit="save" class="space-y-4">
+                        <!-- Year Selection -->
+                        <div>
+                            <label for="form_year" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tahun</label>
+                            <select wire:model="formYear" id="form_year" 
+                                    class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100 font-semibold">
+                                @foreach($years as $yr)
+                                    <option value="{{ $yr }}">{{ $yr }}</option>
+                                @endforeach
+                            </select>
                         </div>
-                        <h3 class="text-lg font-bold text-gray-250">Konfirmasi Hapus</h3>
-                    </div>
-                    
-                    <p class="text-sm text-gray-400 mb-6">Apakah Anda yakin ingin menghapus catatan tagihan ini?</p>
-                    
-                    <div class="flex justify-end gap-3">
-                        <button type="button" @click="openConfirm = false"
-                                class="px-4 py-2 bg-black border border-gray-800 text-gray-400 hover:bg-gray-850 rounded-xl text-sm font-semibold transition">
-                            Batal
+
+                        <!-- Month Selection -->
+                        <div>
+                            <label for="form_month" class="block text-xs font-semibold text-gray-555 uppercase tracking-wider mb-1.5">Bulan</label>
+                            <select wire:model="formMonth" id="form_month" 
+                                    class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100 font-semibold">
+                                @foreach($months as $idx => $name)
+                                    <option value="{{ $idx }}">{{ $name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+
+                        <!-- Title -->
+                        <div>
+                            <label for="trx_title" class="block text-xs font-semibold text-gray-555 uppercase tracking-wider mb-1.5">Nama Tagihan (Bayaran)</label>
+                            <input wire:model="title" type="text" id="trx_title" placeholder="cth: Listrik PLN, Kos Bulanan, WiFi"
+                                   class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
+                            @error('title') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Amount -->
+                        <div>
+                            <label for="trx_amount" class="block text-xs font-semibold text-gray-555 uppercase tracking-wider mb-1.5">Nominal (Total Tagihan)</label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-550 text-sm font-semibold">Rp</span>
+                                <input wire:model="amount" type="number" id="trx_amount" placeholder="0" step="0.01" min="0.01"
+                                       class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
+                            </div>
+                            @error('amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Paid Amount -->
+                        <div>
+                            <label for="trx_paid_amount" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nominal Yang Sudah Dibayar (Opsional)</label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-550 text-sm font-semibold">Rp</span>
+                                <input wire:model="paid_amount" type="number" id="trx_paid_amount" placeholder="0" step="0.01" min="0"
+                                       class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
+                            </div>
+                            @error('paid_amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Category -->
+                        <div>
+                            <label for="trx_category" class="block text-xs font-semibold text-gray-555 uppercase tracking-wider mb-1.5">Kategori</label>
+                            <select wire:model="category" id="trx_category" 
+                                    class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100 font-semibold">
+                                @foreach($categories as $cat)
+                                    <option value="{{ $cat }}">{{ $cat }}</option>
+                                @endforeach
+                            </select>
+                            @error('category') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Status Dropdown -->
+                        <div>
+                            <label for="form_status" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Status Pembayaran</label>
+                            <select wire:model="status" id="form_status" 
+                                    class="w-full text-sm py-2.5 px-4 bg-black border border-gray-850 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100 font-semibold">
+                                <option value="belum">Belum Dibayar</option>
+                                <option value="sudah">Lunas / Sudah Dibayar</option>
+                            </select>
+                            @error('status') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Description -->
+                        <div>
+                            <label for="trx_desc" class="block text-xs font-semibold text-gray-550 uppercase tracking-wider mb-1.5">Keterangan (Opsional)</label>
+                            <textarea wire:model="description" id="trx_desc" placeholder="Catatan tambahan..." rows="2"
+                                      class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100"></textarea>
+                            @error('description') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Submit Button -->
+                        <button type="submit" 
+                                class="w-full py-3 bg-indigo-600 hover:bg-indigo-750 text-white text-sm font-bold rounded-xl shadow-md transition-all duration-150 active:scale-[0.98]">
+                            {{ $editingId ? 'Perbarui Tagihan' : 'Simpan Tagihan' }}
                         </button>
-                        <button type="button" 
-                                @click="$wire.call(confirmAction, deleteId); openConfirm = false"
-                                class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-semibold shadow-md shadow-rose-900/10 transition">
-                            Ya, Hapus
-                        </button>
-                    </div>
+                    </form>
                 </div>
             </div>
         </div>

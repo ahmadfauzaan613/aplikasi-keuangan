@@ -4,11 +4,9 @@ use App\Models\Debt;
 use App\Actions\CreateDebtAction;
 use App\Actions\ToggleDebtStatusAction;
 use Livewire\Volt\Component;
-use Livewire\WithPagination;
+use Illuminate\Support\Carbon;
 
 new class extends Component {
-    use WithPagination;
-
     // Form inputs
     public string $name = '';
     public string $type = 'payable'; // 'payable' or 'receivable'
@@ -16,20 +14,89 @@ new class extends Component {
     public string $due_date = '';
     public string $description = '';
 
-    // Filters
-    public string $filterType = 'all';
-    public string $filterStatus = 'all';
-    public string $search = '';
+    // Add Form Date selections
+    public int $formMonth = 1;
+    public int $formYear = 2026;
 
-    protected $queryString = [
-        'search' => ['except' => ''],
-        'filterType' => ['except' => 'all'],
-        'filterStatus' => ['except' => 'all'],
-    ];
+    // Filter Year & Month
+    public int $selectedYear = 2026;
+    public int $activeMonth = 1;
+
+    // Editing state
+    public ?string $editingId = null;
 
     public function mount(): void
     {
-        $this->due_date = now()->addMonth()->format('Y-m-d');
+        $nowIndo = now('Asia/Jakarta');
+        $this->selectedYear = $nowIndo->year;
+        $this->formYear = $nowIndo->year;
+        $this->formMonth = $nowIndo->month;
+        $this->activeMonth = $nowIndo->month;
+        $this->due_date = $nowIndo->addMonth()->format('Y-m-d');
+    }
+
+    public function getYearsProperty(): array
+    {
+        $currentYear = now()->year;
+        $startYear = 2026;
+        
+        $years = [];
+        for ($y = $startYear; $y <= max($startYear, $currentYear); $y++) {
+            $years[] = $y;
+        }
+        
+        if (now()->month === 12) {
+            $years[] = max($startYear, $currentYear) + 1;
+        }
+
+        return array_unique($years);
+    }
+
+    public function getMonthsProperty(): array
+    {
+        return [
+            1 => 'Januari',
+            2 => 'Februari',
+            3 => 'Maret',
+            4 => 'April',
+            5 => 'Mei',
+            6 => 'Juni',
+            7 => 'Juli',
+            8 => 'Agustus',
+            9 => 'September',
+            10 => 'Oktober',
+            11 => 'November',
+            12 => 'Desember'
+        ];
+    }
+
+    public function selectMonthForForm(int $month): void
+    {
+        $this->editingId = null;
+        $this->reset(['name', 'amount', 'description']);
+        $this->formMonth = $month;
+        $this->formYear = $this->selectedYear;
+        $this->type = 'payable';
+        $this->due_date = Carbon::create($this->selectedYear, $month, 1)->addMonth()->format('Y-m-d');
+    }
+
+    public function setActiveMonth(int $month): void
+    {
+        $this->activeMonth = $month;
+        $this->selectMonthForForm($month);
+    }
+
+    public function edit(string $id): void
+    {
+        $debt = auth()->user()->debts()->findOrFail($id);
+        $this->editingId = $debt->id;
+        $this->name = $debt->name;
+        $this->type = $debt->type;
+        $this->amount = (string) $debt->amount;
+        $this->due_date = $debt->due_date ? $debt->due_date->format('Y-m-d') : '';
+        $this->description = $debt->description ?: '';
+        $this->formMonth = Carbon::parse($debt->created_at)->month;
+        $this->formYear = Carbon::parse($debt->created_at)->year;
     }
 
     public function save(CreateDebtAction $createAction): void
@@ -40,26 +107,47 @@ new class extends Component {
             'amount' => 'required|numeric|min:0.01',
             'due_date' => 'nullable|date',
             'description' => 'nullable|string|max:500',
+            'formMonth' => 'required|integer|between:1,12',
+            'formYear' => 'required|integer',
         ]);
 
-        $createAction->execute(auth()->user(), [
-            'name' => $this->name,
-            'type' => $this->type,
-            'amount' => (float) $this->amount,
-            'due_date' => $this->due_date ?: null,
-            'description' => $this->description ?: null,
-        ]);
+        $date = Carbon::create($this->formYear, $this->formMonth, 1)->startOfDay();
+
+        if ($this->editingId) {
+            $debt = auth()->user()->debts()->findOrFail($this->editingId);
+            $debt->name = $this->name;
+            $debt->type = $this->type;
+            $debt->amount = (float) $this->amount;
+            $debt->due_date = $this->due_date ?: null;
+            $debt->description = $this->description ?: null;
+            $debt->created_at = $date;
+            $debt->updated_at = $date;
+            $debt->save(['timestamps' => false]);
+            $this->editingId = null;
+            session()->flash('message', 'Catatan hutang/piutang berhasil diperbarui!');
+        } else {
+            $debt = $createAction->execute(auth()->user(), [
+                'name' => $this->name,
+                'type' => $this->type,
+                'amount' => (float) $this->amount,
+                'due_date' => $this->due_date ?: null,
+                'description' => $this->description ?: null,
+            ]);
+            $debt->created_at = $date;
+            $debt->updated_at = $date;
+            $debt->save(['timestamps' => false]);
+            session()->flash('message', 'Catatan hutang/piutang berhasil ditambahkan!');
+        }
 
         $this->reset(['name', 'amount', 'description']);
         $this->due_date = now()->addMonth()->format('Y-m-d');
-
-        session()->flash('message', 'Catatan hutang/piutang berhasil ditambahkan!');
+        $this->dispatch('close-modal');
     }
 
-    public function toggleStatus(string $id, ToggleDebtStatusAction $toggleAction): void
+    public function updateStatus(string $id, string $newStatus): void
     {
         $debt = auth()->user()->debts()->findOrFail($id);
-        $toggleAction->execute($debt);
+        $debt->update(['status' => $newStatus]);
 
         session()->flash('message', 'Status hutang/piutang berhasil diperbarui!');
     }
@@ -70,6 +158,20 @@ new class extends Component {
         $debt->delete();
 
         session()->flash('message', 'Catatan berhasil dihapus!');
+    }
+
+    public function getMonthlyDataProperty(): array
+    {
+        $debts = auth()->user()->debts()
+            ->whereYear('created_at', $this->selectedYear)
+            ->get();
+
+        $data = [];
+        for ($m = 1; $m <= 12; $m++) {
+            $data[$m] = $debts->filter(fn($d) => Carbon::parse($d->created_at)->month === $m);
+        }
+
+        return $data;
     }
 
     public function getStatsProperty(): array
@@ -85,29 +187,31 @@ new class extends Component {
         ];
     }
 
+    public function getActiveMonthStatsProperty(): array
+    {
+        $total = 0;
+        $items = $this->monthlyData[$this->activeMonth] ?? [];
+        foreach ($items as $item) {
+            $total += $item->amount;
+        }
+        return [
+            'total' => $total,
+        ];
+    }
+
     public function with(): array
     {
-        $query = auth()->user()->debts()
-            ->when($this->search, function ($q) {
-                $q->where('name', 'like', '%' . $this->search . '%');
-            })
-            ->when($this->filterType !== 'all', function ($q) {
-                $q->where('type', $this->filterType);
-            })
-            ->when($this->filterStatus !== 'all', function ($q) {
-                $q->where('status', $this->filterStatus);
-            })
-            ->orderBy('due_date', 'asc')
-            ->orderBy('created_at', 'desc');
-
         return [
-            'debts' => $query->paginate(5),
+            'monthlyData' => $this->monthlyData,
+            'years' => $this->years,
+            'months' => $this->months,
             'stats' => $this->stats,
+            'activeMonthStats' => $this->activeMonthStats,
         ];
     }
 }; ?>
 
-<div class="space-y-8" x-data>
+<div class="space-y-8" x-data="{ showFormModal: false }" @close-modal.window="showFormModal = false">
     @if (session()->has('message'))
         <div x-data="{ show: true }" x-show="show" 
              x-transition:enter="transition ease-out duration-300" 
@@ -130,230 +234,209 @@ new class extends Component {
         </div>
     @endif
 
-    <!-- Cards Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <!-- Debts Payable (Hutang Kita) -->
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-sm flex items-center transition-all duration-300 hover:scale-[1.02]">
-            <div class="p-3 bg-rose-950/40 rounded-xl mr-4 text-rose-400">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-            </div>
+    <!-- Year Filter Header & Stats -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gray-900 p-6 rounded-2xl border border-gray-850 shadow-sm">
+        <div>
+            <h3 class="text-lg font-bold text-gray-250 mb-1 flex items-center">
+                <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                Berkas Hutang & Piutang Tahunan
+            </h3>
+            <p class="text-xs text-gray-550">Menampilkan rekapan hutang dan piutang.</p>
+        </div>
+    </div>
+
+    <!-- Stats Cards Summary -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition">
+            <p class="text-indigo-300 text-xs font-extrabold uppercase tracking-wider">Hutang & Piutang {{ $months[$activeMonth] }}</p>
+            <h4 class="text-2xl font-extrabold text-indigo-300 mt-1.5">
+                Rp {{ number_format($activeMonthStats['total'], 0, ',', '.') }}
+            </h4>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition flex items-center justify-between">
             <div>
-                <p class="text-gray-500 text-xs font-semibold uppercase tracking-wider">{{ __('Hutang Saya (Belum Lunas)') }}</p>
-                <h4 class="text-2xl font-extrabold text-gray-200 mt-1">
-                    Rp {{ number_format($stats['payable'], 2, ',', '.') }}
+                <p class="text-rose-300 text-xs font-extrabold uppercase tracking-wider">Hutang Saya (Belum Lunas)</p>
+                <h4 class="text-2xl font-extrabold text-rose-500 mt-1.5">
+                    Rp {{ number_format($stats['payable'], 0, ',', '.') }}
                 </h4>
+            </div>
+            <div class="p-3 bg-rose-950/40 rounded-xl text-rose-455">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.1" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
             </div>
         </div>
-
-        <!-- Debts Receivable (Piutang Kita) -->
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-sm flex items-center transition-all duration-300 hover:scale-[1.02]">
-            <div class="p-3 bg-emerald-950/40 rounded-xl mr-4 text-emerald-400">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition flex items-center justify-between">
             <div>
-                <p class="text-gray-500 text-xs font-semibold uppercase tracking-wider">{{ __('Piutang Orang Lain (Belum Lunas)') }}</p>
-                <h4 class="text-2xl font-extrabold text-gray-200 mt-1">
-                    Rp {{ number_format($stats['receivable'], 2, ',', '.') }}
+                <p class="text-emerald-300 text-xs font-extrabold uppercase tracking-wider">Piutang Orang (Belum Lunas)</p>
+                <h4 class="text-2xl font-extrabold text-emerald-450 mt-1.5">
+                    Rp {{ number_format($stats['receivable'], 0, ',', '.') }}
                 </h4>
+            </div>
+            <div class="p-3 bg-emerald-950/40 rounded-xl text-emerald-455">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.1" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             </div>
         </div>
     </div>
 
-    <!-- Main Content Area -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        <!-- Table Column -->
-        <div class="lg:col-span-2 space-y-6">
-            
-            <!-- Filters -->
-            <div class="bg-gray-900 p-5 rounded-2xl border border-gray-850 shadow-sm space-y-4">
-                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                    <h3 class="text-lg font-bold text-gray-200 flex items-center">
-                        <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                        Daftar Hutang & Piutang
-                    </h3>
-                    <div class="relative w-full md:w-64">
-                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <svg class="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                        </div>
-                        <input wire:model.live.debounce.300ms="search" type="text" placeholder="Cari nama..." 
-                               class="pl-10 pr-4 py-2 w-full text-sm bg-black border border-gray-800 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
-                    </div>
-                </div>
-
-                <div class="flex flex-wrap items-center gap-3 pt-2">
-                    <button wire:click="$set('filterType', 'all')" 
-                            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition {{ $filterType === 'all' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-black text-gray-400 hover:bg-gray-800' }}">
-                        Semua Jenis
-                    </button>
-                    <button wire:click="$set('filterType', 'payable')" 
-                            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition {{ $filterType === 'payable' ? 'bg-rose-600 text-white shadow-sm' : 'bg-black text-gray-400 hover:bg-gray-800' }}">
-                        Hutang Saya
-                    </button>
-                    <button wire:click="$set('filterType', 'receivable')" 
-                            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition {{ $filterType === 'receivable' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-black text-gray-400 hover:bg-gray-800' }}">
-                        Piutang Orang
-                    </button>
-
-                    <div class="ml-auto w-full sm:w-auto flex items-center gap-2">
-                        <span class="text-xs text-gray-500">Status:</span>
-                        <select wire:model.live="filterStatus" 
-                                class="text-xs py-1.5 pl-3 pr-8 bg-black text-gray-400 border-none rounded-lg focus:ring-indigo-500">
-                            <option value="all">Semua Status</option>
-                            <option value="unpaid">Belum Lunas</option>
-                            <option value="paid">Lunas</option>
-                        </select>
+    <!-- Filter Navigation Bar (Sticky) -->
+    <div class="sticky top-4 z-30 bg-gray-900/95 backdrop-blur-md border border-gray-850 p-4 rounded-2xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-center gap-2 text-indigo-400 font-bold text-sm pl-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+            <span>Arsip & Filter Catatan</span>
+        </div>
+        <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+            <!-- Month Selector Dropdown -->
+            <div class="flex items-center gap-2.5">
+                <span class="text-xs font-semibold text-gray-400">Pilih Bulan:</span>
+                <div class="relative inline-block text-left">
+                    <select wire:change="setActiveMonth($event.target.value)" 
+                            class="py-2 pl-3 pr-10 bg-black border border-gray-855 rounded-xl focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-gray-200 text-xs font-bold appearance-none cursor-pointer">
+                        @foreach($months as $monthIdx => $monthName)
+                            <option value="{{ $monthIdx }}" {{ $activeMonth === $monthIdx ? 'selected' : '' }}>{{ $monthName }}</option>
+                        @endforeach
+                    </select>
+                    <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-500">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
                     </div>
                 </div>
             </div>
 
-            <!-- Debts Table -->
-            <div class="bg-gray-900 rounded-2xl border border-gray-800 shadow-sm overflow-hidden">
+            <!-- Year Selector Dropdown (Berkas Tahun) -->
+            <div class="flex items-center gap-2.5">
+                <span class="text-xs font-semibold text-gray-400">Berkas Tahun:</span>
+                <div class="relative inline-block text-left">
+                    <select wire:model.live="selectedYear" 
+                            class="py-2 pl-3 pr-10 bg-black border border-gray-855 rounded-xl focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-gray-200 text-xs font-bold appearance-none cursor-pointer">
+                        @foreach($years as $yr)
+                            <option value="{{ $yr }}">{{ $yr }}</option>
+                        @endforeach
+                    </select>
+                    <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-500">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Ledger Content (Full Width) -->
+    <div class="w-full space-y-6">
+        @foreach($months as $monthIdx => $monthName)
+            @if($monthIdx === $activeMonth)
+                @php
+                    $monthItems = $monthlyData[$monthIdx];
+                @endphp
+                <div id="month-card-{{ $monthIdx }}" class="scroll-mt-24 bg-gray-900 rounded-2xl border border-gray-850 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 bg-black/40 border-b border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="flex items-center gap-2">
+                        <span class="text-base font-black text-white">{{ $monthName }}</span>
+                        <span class="text-xs font-extrabold text-indigo-400">({{ count($monthItems) }} Catatan)</span>
+                    </div>
+                    <div class="flex items-center gap-4 text-xs">
+                        <button type="button" wire:click="selectMonthForForm({{ $monthIdx }})" 
+                                @click="showFormModal = true"
+                                class="py-1.5 px-3 bg-indigo-650 hover:bg-indigo-600 text-white text-xs font-black rounded-xl transition active:scale-[0.98] flex items-center gap-1 shadow-md shadow-indigo-900/20 cursor-pointer">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+                            Catat Hutang/Piutang
+                        </button>
+                    </div>
+                </div>
+                
                 <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
+                    <table class="w-full text-left border-collapse border border-gray-800">
                         <thead>
-                            <tr class="border-b border-gray-800 bg-black/50">
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{{ __('Nama') }}</th>
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{{ __('Tipe') }}</th>
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">{{ __('Jumlah') }}</th>
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{{ __('Jatuh Tempo') }}</th>
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">{{ __('Status') }}</th>
-                                <th class="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider"></th>
+                            <tr class="bg-gray-900 border-b border-gray-855 text-xs text-white uppercase font-black tracking-wider">
+                                <th class="px-6 py-3 border border-gray-800">Nama</th>
+                                <th class="px-6 py-3 border border-gray-800 text-center w-36">Tipe</th>
+                                <th class="px-6 py-3 border border-gray-800 text-center w-36">Status</th>
+                                <th class="px-6 py-3 border border-gray-800 text-center w-40">Jatuh Tempo</th>
+                                <th class="px-6 py-3 border border-gray-800 text-right w-48">Nominal</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-800">
-                            @forelse($debts as $debt)
-                                <tr class="hover:bg-gray-800/30 transition duration-150">
-                                    <td class="px-6 py-4">
-                                        <div class="flex flex-col">
-                                            <span class="text-sm font-semibold text-gray-200">{{ $debt->name }}</span>
-                                            @if($debt->description)
-                                                <span class="text-xs text-gray-500 mt-0.5 max-w-xs truncate">{{ $debt->description }}</span>
-                                            @endif
-                                        </div>
+                        <tbody class="divide-y divide-gray-800 bg-black/20">
+                            @if(count($monthItems) > 0)
+                                @foreach($monthItems as $item)
+                                    <tr class="hover:bg-gray-850/30 text-xs transition group">
+                                        <!-- Nama -->
+                                        <td class="px-6 py-3 font-bold text-white border border-gray-800">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex flex-col">
+                                                    <span>{{ $item->name }}</span>
+                                                    @if($item->description)
+                                                        <span class="text-xs text-gray-400 font-medium mt-0.5">{{ $item->description }}</span>
+                                                    @endif
+                                                </div>
+                                                <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all ml-2">
+                                                    <button type="button" 
+                                                            wire:click="edit('{{ $item->id }}')" 
+                                                            @click="showFormModal = true"
+                                                            class="text-gray-450 hover:text-indigo-400 p-0.5 rounded transition-all cursor-pointer"
+                                                            title="Edit catatan">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                                                    </button>
+                                                    <button type="button" 
+                                                            wire:click="delete('{{ $item->id }}')" 
+                                                            class="text-gray-450 hover:text-rose-455 p-0.5 rounded transition-all cursor-pointer"
+                                                            title="Hapus catatan">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <!-- Tipe -->
+                                        <td class="px-6 py-3 text-center border border-gray-800 w-36 font-bold">
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-extrabold {{ $item->type === 'payable' ? 'bg-rose-950/40 text-rose-400 border border-rose-900/50' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/50' }}">
+                                                {{ $item->type === 'payable' ? 'Hutang Saya' : 'Piutang Orang' }}
+                                            </span>
+                                        </td>
+                                        <!-- Status -->
+                                        <td class="px-6 py-3 text-center border border-gray-800 w-36">
+                                            <select wire:change="updateStatus('{{ $item->id }}', $event.target.value)" 
+                                                    class="bg-transparent border-0 text-xs font-black p-0.5 focus:ring-0 focus:outline-none cursor-pointer w-full text-center {{ $item->status === 'paid' ? 'text-emerald-400' : 'text-rose-500' }}">
+                                                <option value="unpaid" class="bg-gray-900 text-rose-500 font-semibold" {{ $item->status === 'unpaid' ? 'selected' : '' }}>Belum Lunas</option>
+                                                <option value="paid" class="bg-gray-900 text-emerald-400 font-semibold" {{ $item->status === 'paid' ? 'selected' : '' }}>Lunas</option>
+                                            </select>
+                                        </td>
+                                        <!-- Jatuh Tempo -->
+                                        <td class="px-6 py-3 text-center text-gray-300 font-bold border border-gray-800 w-40 whitespace-nowrap">
+                                            {{ $item->due_date ? $item->due_date->format('d M Y') : '-' }}
+                                        </td>
+                                        <!-- Nominal -->
+                                        <td class="px-6 py-3 text-right font-black text-white border border-gray-800 whitespace-nowrap w-48">
+                                            Rp {{ number_format($item->amount, 0, ',', '.') }}
+                                        </td>
+                                    </tr>
+                                @endforeach
+                                <!-- Bottom Row: Total -->
+                                @php
+                                    $monthTotalAmount = collect($monthItems)->sum('amount');
+                                @endphp
+                                <tr class="bg-indigo-950/30 text-xs font-black border-t-2 border-gray-800">
+                                    <td colspan="4" class="px-6 py-3.5 text-indigo-300 font-extrabold border border-gray-800 text-left">
+                                        Total Hutang & Piutang Bulan Ini
                                     </td>
-                                    <td class="px-6 py-4 text-sm whitespace-nowrap">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {{ $debt->type === 'payable' ? 'bg-rose-950/40 text-rose-400 border border-rose-900/50' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/50' }}">
-                                            {{ $debt->type === 'payable' ? 'Hutang Saya' : 'Piutang Orang' }}
-                                        </span>
-                                    </td>
-                                    <td class="px-6 py-4 text-right whitespace-nowrap">
-                                        <span class="text-sm font-bold text-gray-200">
-                                            Rp {{ number_format($debt->amount, 0, ',', '.') }}
-                                        </span>
-                                    </td>
-                                    <td class="px-6 py-4 text-sm text-gray-400 whitespace-nowrap">
-                                        {{ $debt->due_date ? $debt->due_date->format('d M Y') : '-' }}
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <button wire:click="toggleStatus('{{ $debt->id }}')" 
-                                                class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold transition-all duration-200 {{ $debt->status === 'paid' ? 'bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/30' : 'bg-amber-900/20 text-amber-400 hover:bg-amber-900/30' }}">
-                                            <span class="w-1.5 h-1.5 rounded-full mr-1.5 {{ $debt->status === 'paid' ? 'bg-emerald-400' : 'bg-amber-400' }}"></span>
-                                            {{ $debt->status === 'paid' ? 'Lunas' : 'Belum Lunas' }}
-                                        </button>
-                                    </td>
-                                    <td class="px-6 py-4 text-right whitespace-nowrap">
-                                        <button type="button"
-                                                @click="$dispatch('open-confirm-modal', { id: '{{ $debt->id }}', action: 'delete' })" 
-                                                class="text-gray-500 hover:text-rose-400 transition-colors p-1 rounded hover:bg-rose-955/20">
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                                        </button>
+                                    <td class="px-6 py-3.5 text-right text-indigo-300 border border-gray-800">
+                                        Rp {{ number_format($monthTotalAmount, 0, ',', '.') }}
                                     </td>
                                 </tr>
-                            @empty
-                                <tr>
-                                    <td colspan="6" class="px-6 py-8 text-center text-gray-500">
-                                        <svg class="w-12 h-12 mx-auto mb-3 opacity-30 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                                        <p class="text-sm font-semibold">{{ __('Tidak ada catatan hutang/piutang') }}</p>
+                            @else
+                                <tr class="text-xs text-gray-550 hover:bg-gray-850/10 transition">
+                                    <td colspan="5" class="px-6 py-6 text-center italic text-gray-400 border border-gray-800">
+                                        - Belum ada catatan hutang/piutang untuk bulan {{ $monthName }} -
                                     </td>
                                 </tr>
-                            @endforelse
+                            @endif
                         </tbody>
                     </table>
                 </div>
-
-                @if($debts->hasPages())
-                    <div class="px-6 py-4 bg-black/30 border-t border-gray-800">
-                        {{ $debts->links() }}
-                    </div>
-                @endif
             </div>
-        </div>
-
-        <!-- Form Column -->
-        <div class="space-y-6">
-            <div class="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-sm">
-                <h3 class="text-lg font-bold text-gray-200 mb-6 flex items-center">
-                    <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    Catat Hutang/Piutang
-                </h3>
-
-                <form wire:submit="save" class="space-y-4">
-                    <!-- Type selection -->
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Jenis Catatan</label>
-                        <div class="grid grid-cols-2 gap-3">
-                            <button type="button" wire:click="$set('type', 'payable')" 
-                                    class="py-2 rounded-xl text-xs font-bold text-center border transition-all duration-200 {{ $type === 'payable' ? 'bg-rose-950/20 border-rose-500 text-rose-400 ring-2 ring-rose-500/10' : 'bg-black border-gray-800 text-gray-400 hover:bg-gray-850' }}">
-                                Hutang Saya
-                            </button>
-                            <button type="button" wire:click="$set('type', 'receivable')" 
-                                    class="py-2 rounded-xl text-xs font-bold text-center border transition-all duration-200 {{ $type === 'receivable' ? 'bg-emerald-950/20 border-emerald-500 text-emerald-400 ring-2 ring-emerald-500/10' : 'bg-black border-gray-800 text-gray-400 hover:bg-gray-850' }}">
-                                Piutang Orang
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Name -->
-                    <div>
-                        <label for="debt_name" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nama Orang / Lembaga</label>
-                        <input wire:model="name" type="text" id="debt_name" placeholder="Nama..."
-                               class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
-                        @error('name') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                    </div>
-
-                    <!-- Amount -->
-                    <div>
-                        <label for="debt_amount" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Jumlah</label>
-                        <div class="relative">
-                            <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-500 text-sm font-semibold">Rp</span>
-                            <input wire:model="amount" type="number" id="debt_amount" placeholder="0" step="0.01" min="0.01"
-                                   class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
-                        </div>
-                        @error('amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                    </div>
-
-                    <!-- Due Date -->
-                    <div>
-                        <label for="debt_due" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tenggat Waktu / Jatuh Tempo</label>
-                        <input wire:model="due_date" type="date" id="debt_due"
-                               class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
-                        @error('due_date') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                    </div>
-
-                    <!-- Description -->
-                    <div>
-                        <label for="debt_desc" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Deskripsi / Keperluan</label>
-                        <textarea wire:model="description" id="debt_desc" placeholder="cth: Pinjam uang beli makan..." rows="2"
-                                  class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100"></textarea>
-                        @error('description') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                    </div>
-
-                    <button type="submit" 
-                            class="w-full py-3 bg-indigo-600 hover:bg-indigo-750 text-white text-sm font-bold rounded-xl shadow-md transition-all duration-150 active:scale-[0.98]">
-                        Simpan Catatan
-                    </button>
-                </form>
-            </div>
-        </div>
+            @endif
+        @endforeach
     </div>
-</div>
 
-    <!-- Custom Confirmation Modal -->
-    <div x-data="{ openConfirm: false, deleteId: null, confirmAction: null }"
-         @open-confirm-modal.window="deleteId = $event.detail.id; confirmAction = $event.detail.action; openConfirm = true"
-         class="relative z-50"
-         x-show="openConfirm"
+    <!-- Form Modal (Catat Hutang/Piutang Popup) -->
+    <div class="relative z-40" 
+         x-show="showFormModal" 
+         @close-modal.window="showFormModal = false"
          style="display: none;">
         <!-- Backdrop -->
         <div class="fixed inset-0 bg-black/75 backdrop-blur-sm transition-opacity"></div>
@@ -361,29 +444,100 @@ new class extends Component {
         <!-- Modal Container -->
         <div class="fixed inset-0 z-50 overflow-y-auto">
             <div class="flex min-h-full items-center justify-center p-4 text-center">
-                <div class="relative transform overflow-hidden rounded-2xl bg-gray-900 border border-gray-850 p-6 text-left shadow-xl transition-all w-full max-w-md animate-fade-in"
-                     @click.away="openConfirm = false">
-                    <div class="flex items-center gap-4 text-rose-500 mb-4">
-                        <div class="p-3 bg-rose-955/50 rounded-xl border border-rose-900/30">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                <div class="relative transform overflow-hidden rounded-2xl bg-gray-900 border border-gray-850 p-6 text-left shadow-2xl transition-all w-full max-w-lg"
+                     @click.away="showFormModal = false">
+                    
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="text-lg font-bold text-gray-250 flex items-center">
+                            <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            {{ $editingId ? 'Edit Catatan Hutang/Piutang' : 'Catat Hutang/Piutang' }}
+                        </h3>
+                        <button type="button" @click="showFormModal = false" class="text-gray-555 hover:text-gray-350">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+
+                    <form wire:submit="save" class="space-y-4">
+                        <!-- Year Selection -->
+                        <div>
+                            <label for="form_year" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tahun</label>
+                            <select wire:model="formYear" id="form_year" 
+                                    class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100 font-semibold">
+                                @foreach($years as $yr)
+                                    <option value="{{ $yr }}">{{ $yr }}</option>
+                                @endforeach
+                            </select>
                         </div>
-                        <h3 class="text-lg font-bold text-gray-250">Konfirmasi Hapus</h3>
-                    </div>
-                    
-                    <p class="text-sm text-gray-400 mb-6">Apakah Anda yakin ingin menghapus catatan hutang/piutang ini?</p>
-                    
-                    <div class="flex justify-end gap-3">
-                        <button type="button" @click="openConfirm = false"
-                                class="px-4 py-2 bg-black border border-gray-800 text-gray-400 hover:bg-gray-850 rounded-xl text-sm font-semibold transition">
-                            Batal
+
+                        <!-- Month Selection -->
+                        <div>
+                            <label for="form_month" class="block text-xs font-semibold text-gray-555 uppercase tracking-wider mb-1.5">Bulan</label>
+                            <select wire:model="formMonth" id="form_month" 
+                                    class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100 font-semibold">
+                                @foreach($months as $idx => $name)
+                                    <option value="{{ $idx }}">{{ $name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+
+                        <!-- Type selection -->
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Jenis Catatan</label>
+                            <div class="grid grid-cols-2 gap-3">
+                                <button type="button" wire:click="$set('type', 'payable')" 
+                                        class="py-2.5 rounded-xl text-xs font-bold text-center border transition-all duration-200 {{ $type === 'payable' ? 'bg-rose-955/20 border-rose-500 text-rose-400 ring-2 ring-rose-500/10' : 'bg-black border-gray-800 text-gray-400 hover:bg-gray-850' }}">
+                                    Hutang Saya
+                                </button>
+                                <button type="button" wire:click="$set('type', 'receivable')" 
+                                        class="py-2.5 rounded-xl text-xs font-bold text-center border transition-all duration-200 {{ $type === 'receivable' ? 'bg-emerald-955/20 border-emerald-500 text-emerald-400 ring-2 ring-emerald-500/10' : 'bg-black border-gray-800 text-gray-400 hover:bg-gray-850' }}">
+                                    Piutang Orang
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Name -->
+                        <div>
+                            <label for="debt_name" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nama Orang / Lembaga</label>
+                            <input wire:model="name" type="text" id="debt_name" placeholder="Nama..."
+                                   class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100">
+                            @error('name') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Amount -->
+                        <div>
+                            <label for="debt_amount" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Jumlah</label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-500 text-sm font-semibold">Rp</span>
+                                <input wire:model="amount" type="number" id="debt_amount" placeholder="0" step="0.01" min="0.01"
+                                       class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100">
+                            </div>
+                            @error('amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Due Date -->
+                        <div>
+                            <label for="debt_due" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tenggat Waktu / Jatuh Tempo</label>
+                            <input wire:model="due_date" type="date" id="debt_due"
+                                   class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100">
+                            @error('due_date') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Description -->
+                        <div>
+                            <label for="debt_desc" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Deskripsi / Keperluan</label>
+                            <textarea wire:model="description" id="debt_desc" placeholder="cth: Pinjam uang beli makan..." rows="2"
+                                      class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100"></textarea>
+                            @error('description') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Submit Button -->
+                        <button type="submit" 
+                                class="w-full py-3 bg-indigo-600 hover:bg-indigo-750 text-white text-sm font-bold rounded-xl shadow-md transition-all duration-150 active:scale-[0.98]">
+                            {{ $editingId ? 'Perbarui Catatan' : 'Simpan Catatan' }}
                         </button>
-                        <button type="button" 
-                                @click="$wire.call(confirmAction, deleteId); openConfirm = false"
-                                class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-semibold shadow-md shadow-rose-900/10 transition">
-                            Ya, Hapus
-                        </button>
-                    </div>
+                    </form>
                 </div>
             </div>
         </div>
     </div>
+</div>

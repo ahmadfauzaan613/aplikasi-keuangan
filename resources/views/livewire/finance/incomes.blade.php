@@ -280,14 +280,14 @@ new class extends Component {
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse border border-gray-800">
                     <thead>
-                        <tr class="bg-gray-900 border-b border-gray-800 text-xs text-gray-300 uppercase font-bold">
-                            <th class="px-4 py-2.5 border border-gray-800 text-center">Bulan</th>
-                            <th class="px-4 py-2.5 border border-gray-800">Nama Pendapatan</th>
-                            <th class="px-4 py-2.5 border border-gray-800 text-right">Jumlah (Rupiah)</th>
-                            <th class="px-4 py-2.5 border border-gray-800 text-center">Tahun</th>
-                            <th class="px-4 py-2.5 border border-gray-800 text-center">Status</th>
-                            <th class="px-4 py-2.5 border border-gray-800">Keterangan</th>
-                            <th class="px-4 py-2.5 border border-gray-800 text-center">Aksi</th>
+                        <tr class="bg-gray-900 border-b border-gray-850 text-xs text-white uppercase font-black tracking-wider">
+                            <th class="px-6 py-3 border border-gray-800 text-center">Bulan</th>
+                            <th class="px-6 py-3 border border-gray-800">Nama Pendapatan</th>
+                            <th class="px-6 py-3 border border-gray-800 text-right">Jumlah (Rupiah)</th>
+                            <th class="px-6 py-3 border border-gray-800 text-center">Tahun</th>
+                            <th class="px-6 py-3 border border-gray-800 text-center">Status</th>
+                            <th class="px-6 py-3 border border-gray-800">Keterangan</th>
+                            <th class="px-6 py-3 border border-gray-800 text-center">Aksi</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-800 bg-black/20">
@@ -300,55 +300,45 @@ new class extends Component {
                             @endphp
                             @if($monthItems->count() > 0)
                                 @foreach($monthItems as $index => $item)
-                                    <tr class="hover:bg-gray-800/20 text-xs transition">
-                                        <td class="px-4 py-2.5 font-bold text-gray-200 border border-gray-800 text-center">
+                                    <tr class="hover:bg-gray-850/30 text-xs transition">
+                                        <td class="px-6 py-3 font-extrabold text-indigo-400 border border-gray-800 text-center">
                                             {{ $monthName }}
                                         </td>
-                                        <td class="px-4 py-2.5 font-semibold text-gray-300 border border-gray-800">
+                                        <td class="px-6 py-3 font-bold text-white border border-gray-800">
                                             {{ $item->title }}
                                         </td>
-                                        <td class="px-4 py-2.5 text-right font-mono font-bold text-emerald-450 border border-gray-800">
+                                        <td class="px-6 py-3 text-right font-black text-emerald-450 border border-gray-800">
                                             Rp {{ number_format($item->amount, 0, ',', '.') }}
                                         </td>
-                                        <td class="px-4 py-2.5 text-center text-gray-400 font-bold border border-gray-800">
+                                        <td class="px-6 py-3 text-center text-gray-300 font-bold border border-gray-800">
                                             {{ $selectedYear }}
                                         </td>
-                                        <td class="px-4 py-2.5 text-center border border-gray-800">
+                                        <td class="px-6 py-3 text-center border border-gray-800">
                                             <select wire:change="updateStatus('{{ $item->id }}', $event.target.value)" 
-                                                    class="bg-transparent border-0 text-xs font-bold p-0.5 focus:ring-0 focus:outline-none cursor-pointer w-full text-center {{ $item->status === 'sudah' ? 'text-emerald-400' : 'text-amber-400' }}">
+                                                    class="bg-transparent border-0 text-xs font-black p-0.5 focus:ring-0 focus:outline-none cursor-pointer w-full text-center {{ $item->status === 'sudah' ? 'text-emerald-400' : 'text-amber-400' }}">
                                                 <option value="belum" class="bg-gray-900 text-amber-400 font-semibold" {{ $item->status === 'belum' ? 'selected' : '' }}>Belum Diterima</option>
                                                 <option value="sudah" class="bg-gray-900 text-emerald-400 font-semibold" {{ $item->status === 'sudah' ? 'selected' : '' }}>Sudah Diterima</option>
                                             </select>
                                         </td>
-                                        <td class="px-4 py-2.5 text-gray-400 border border-gray-800 truncate max-w-xs">
+                                        <td class="px-6 py-3 text-gray-300 border border-gray-800 truncate max-w-xs">
                                             {{ $item->description ?: '-' }}
                                         </td>
-                                        <td class="px-4 py-2.5 text-center border border-gray-800">
+                                        <td class="px-6 py-3 text-center border border-gray-800">
                                             <button type="button" 
                                                     @click="$dispatch('open-confirm-modal', { id: '{{ $item->id }}', action: 'delete' })" 
-                                                    class="text-gray-555 hover:text-rose-400 p-1 rounded transition-all">
+                                                    class="text-gray-450 hover:text-rose-455 p-1 rounded transition-all cursor-pointer">
                                                 <svg class="w-3.5 h-3.5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                             </button>
                                         </td>
                                     </tr>
                                 @endforeach
                             @else
-                                <tr class="text-xs text-gray-500 bg-gray-955/20 hover:bg-gray-800/10 transition">
-                                    <td class="px-4 py-2.5 font-bold text-gray-400 border border-gray-800 text-center">
+                                <tr class="text-xs text-gray-550 hover:bg-gray-850/10 transition">
+                                    <td class="px-6 py-4 font-extrabold text-indigo-400 border border-gray-800 text-center">
                                         {{ $monthName }}
                                     </td>
-                                    <td class="px-4 py-2.5 italic text-gray-600 border border-gray-800">- Belum ada pendapatan -</td>
-                                    <td class="px-4 py-2.5 text-right text-gray-600 font-mono border border-gray-800">Rp 0</td>
-                                    <td class="px-4 py-2.5 text-center text-gray-600 font-bold border border-gray-800">{{ $selectedYear }}</td>
-                                    <td class="px-4 py-2.5 text-center text-gray-600 border border-gray-800 italic">Belum Diterima</td>
-                                    <td class="px-4 py-2.5 text-gray-600 border border-gray-800">-</td>
-                                    <td class="px-4 py-2.5 text-center border border-gray-800">
-                                        <button type="button" wire:click="selectMonthForForm({{ $monthIdx }})" 
-                                                @click="showFormModal = true"
-                                                class="text-indigo-400 hover:text-indigo-300 font-bold hover:underline flex items-center justify-center mx-auto gap-1">
-                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                                            Catat
-                                        </button>
+                                    <td colspan="5" class="px-6 py-4 text-center italic text-gray-600 border border-gray-800">
+                                        - Belum ada catatan pendapatan -
                                     </td>
                                 </tr>
                             @endif
