@@ -9,9 +9,6 @@ new #[Layout('layouts.guest')] class extends Component
 {
     public LoginForm $form;
 
-    /**
-     * Handle an incoming authentication request.
-     */
     public function login(): void
     {
         $this->validate();
@@ -19,6 +16,12 @@ new #[Layout('layouts.guest')] class extends Component
         $this->form->authenticate();
 
         Session::regenerate();
+
+        // Single Active Session: Kick out other sessions for this user
+        \Illuminate\Support\Facades\DB::table('sessions')
+            ->where('user_id', \Illuminate\Support\Facades\Auth::id())
+            ->where('id', '!=', Session::getId())
+            ->delete();
 
         $this->redirectIntended(default: route('dashboard', absolute: false), navigate: true);
     }
@@ -29,11 +32,11 @@ new #[Layout('layouts.guest')] class extends Component
     <x-auth-session-status class="mb-4" :status="session('status')" />
 
     <form wire:submit="login">
-        <!-- Email Address -->
+        <!-- Username -->
         <div>
-            <x-input-label for="email" :value="__('Email')" />
-            <x-text-input wire:model="form.email" id="email" class="block mt-1 w-full" type="email" name="email" required autofocus autocomplete="username" />
-            <x-input-error :messages="$errors->get('form.email')" class="mt-2" />
+            <x-input-label for="username" :value="__('Username')" />
+            <x-text-input wire:model="form.username" id="username" class="block mt-1 w-full" type="text" name="username" required autofocus autocomplete="username" />
+            <x-input-error :messages="$errors->get('form.username')" class="mt-2" />
         </div>
 
         <!-- Password -->
@@ -57,12 +60,6 @@ new #[Layout('layouts.guest')] class extends Component
         </div>
 
         <div class="flex items-center justify-end mt-4">
-            @if (Route::has('password.request'))
-                <a class="underline text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800" href="{{ route('password.request') }}" wire:navigate>
-                    {{ __('Forgot your password?') }}
-                </a>
-            @endif
-
             <x-primary-button class="ms-3">
                 {{ __('Log in') }}
             </x-primary-button>

@@ -2,11 +2,23 @@
 
 use Illuminate\Support\Facades\Route;
 
-Route::view('/', 'welcome');
+Route::redirect('/', '/login');
 
 Route::view('dashboard', 'dashboard')
-    ->middleware(['auth', 'verified'])
+    ->middleware(['auth'])
     ->name('dashboard');
+
+Route::view('incomes', 'incomes')
+    ->middleware(['auth'])
+    ->name('incomes');
+
+Route::view('bills', 'bills')
+    ->middleware(['auth'])
+    ->name('bills');
+
+Route::view('debts', 'debts')
+    ->middleware(['auth'])
+    ->name('debts');
 
 Route::view('profile', 'profile')
     ->middleware(['auth'])

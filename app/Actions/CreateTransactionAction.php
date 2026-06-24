@@ -18,7 +18,8 @@ class CreateTransactionAction
      *     category: string,
      *     description?: string|null,
      *     transaction_date: string,
-     *     metadata?: array|null
+     *     metadata?: array|null,
+     *     status?: string
      * } $data
      */
     public function execute(User $user, array $data): Transaction
@@ -32,6 +33,7 @@ class CreateTransactionAction
                 'description' => $data['description'] ?? null,
                 'transaction_date' => $data['transaction_date'],
                 'metadata' => $data['metadata'] ?? [],
+                'status' => $data['status'] ?? 'sudah',
             ]);
         });
     }

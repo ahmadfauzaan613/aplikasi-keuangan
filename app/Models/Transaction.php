@@ -26,6 +26,7 @@ class Transaction extends Model
         'transaction_date',
         'metadata',
         'user_id',
+        'status',
     ];
 
     /**
@@ -64,6 +65,22 @@ class Transaction extends Model
     public function scopeExpense(Builder $query): Builder
     {
         return $query->where('type', 'expense');
+    }
+
+    /**
+     * Scope a query to only include paid transactions.
+     */
+    public function scopePaid(Builder $query): Builder
+    {
+        return $query->where('status', 'sudah');
+    }
+
+    /**
+     * Scope a query to only include unpaid transactions.
+     */
+    public function scopeUnpaid(Builder $query): Builder
+    {
+        return $query->where('status', 'belum');
     }
 
     /**
