@@ -33,6 +33,9 @@ new class extends Component {
         $this->formMonth = $nowIndo->month;
         $this->activeMonth = $nowIndo->month;
         $this->due_date = $nowIndo->addMonth()->format('Y-m-d');
+        // Auto-fill amount dari sisa income - tagihan yang sudah dibayar bulan ini
+        $remainder = $this->billsRemainder;
+        $this->amount = $remainder > 0 ? (string) $remainder : '';
     }
 
     public function getYearsProperty(): array
@@ -73,11 +76,14 @@ new class extends Component {
     public function selectMonthForForm(int $month): void
     {
         $this->editingId = null;
-        $this->reset(['name', 'amount', 'description']);
+        $this->reset(['name', 'description']);
         $this->formMonth = $month;
         $this->formYear = $this->selectedYear;
         $this->type = 'payable';
         $this->due_date = Carbon::create($this->selectedYear, $month, 1)->addMonth()->format('Y-m-d');
+        // Auto-fill amount dari sisa income - tagihan yang sudah dibayar
+        $remainder = $this->billsRemainder;
+        $this->amount = $remainder > 0 ? (string) $remainder : '';
     }
 
     public function setActiveMonth(int $month): void
@@ -199,6 +205,37 @@ new class extends Component {
         ];
     }
 
+    public function getBillsRemainderProperty(): float
+    {
+        $user = auth()->user();
+        $year = $this->selectedYear;
+        $month = $this->activeMonth;
+
+        // Income diambil dari bulan sebelumnya (gaji bulan lalu untuk tagihan bulan ini)
+        if ($month === 1) {
+            $prevMonth = 12;
+            $prevYear = $year - 1;
+        } else {
+            $prevMonth = $month - 1;
+            $prevYear = $year;
+        }
+
+        $income = $user->transactions()
+            ->income()
+            ->whereYear('transaction_date', $prevYear)
+            ->whereMonth('transaction_date', $prevMonth)
+            ->sum('amount');
+
+        // Total yang sudah dibayar dari tagihan (expense) bulan aktif
+        $totalPaid = $user->transactions()
+            ->expense()
+            ->whereYear('transaction_date', $year)
+            ->whereMonth('transaction_date', $month)
+            ->sum('paid_amount');
+
+        return max(0, (float) $income - (float) $totalPaid);
+    }
+
     public function with(): array
     {
         return [
@@ -207,6 +244,7 @@ new class extends Component {
             'months' => $this->months,
             'stats' => $this->stats,
             'activeMonthStats' => $this->activeMonthStats,
+            'billsRemainder' => $this->billsRemainder,
         ];
     }
 }; ?>
@@ -512,6 +550,13 @@ new class extends Component {
                                        class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100">
                             </div>
                             @error('amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                            @if(!$editingId && $billsRemainder > 0)
+                                <p class="text-xs text-gray-500 mt-1.5">
+                                    Sisa tagihan {{ $months[$activeMonth] }}:
+                                    <span class="text-indigo-400 font-semibold">Rp {{ number_format($billsRemainder, 0, ',', '.') }}</span>
+                                    <span class="text-gray-600">(income - tagihan terbayar)</span>
+                                </p>
+                            @endif
                         </div>
 
                         <!-- Due Date -->

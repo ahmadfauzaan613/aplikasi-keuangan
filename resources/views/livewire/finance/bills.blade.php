@@ -156,7 +156,7 @@ new class extends Component {
         $transaction = auth()->user()->transactions()->findOrFail($id);
         $transaction->update([
             'status' => $newStatus,
-            'paid_amount' => $newStatus === 'sudah' ? $transaction->amount : $transaction->paid_amount,
+            'paid_amount' => $newStatus === 'sudah' ? $transaction->amount : 0,
         ]);
 
         session()->flash('message', 'Status pembayaran tagihan berhasil diperbarui!');
@@ -471,7 +471,7 @@ new class extends Component {
                                         </td>
                                         <!-- Nominal yang sudah dibayar -->
                                         <td class="px-6 py-3 border border-gray-800 whitespace-nowrap w-52">
-                                            <div class="relative flex items-center justify-end">
+                                            <div class="relative flex items-center justify-end" wire:key="paid-{{ $item->id }}-{{ $item->paid_amount }}">
                                                 <span class="absolute left-2 text-gray-300 text-[10px]">Rp</span>
                                                 <input type="number" 
                                                        value="{{ (float) $item->paid_amount }}" 
@@ -482,24 +482,23 @@ new class extends Component {
                                         </td>
                                     </tr>
                                 @endforeach
-                                <!-- Bottom Row: Total -->
+                                <!-- Bottom Row: Sisa Gaji -->
                                 @php
                                     $monthTotalAmount = collect($monthItems)->sum('amount');
                                     $monthTotalPaid = collect($monthItems)->sum('paid_amount');
-                                    $monthTotalUnpaid = max(0, $monthTotalAmount - $monthTotalPaid);
+                                    $monthSalary = (float) ($monthlySalaries[$monthIdx]['amount'] ?? 0);
+                                    $monthRemainder = $monthSalary - (float) $monthTotalPaid;
                                 @endphp
-                                <tr class="bg-indigo-950/30 text-xs font-black border-t-2 border-gray-800">
-                                    <td class="px-6 py-3.5 text-indigo-300 font-extrabold border border-gray-800">
-                                        Total Bulan Ini
+                                <tr class="bg-amber-950/20 text-xs border-t-2 border-gray-800">
+                                    <td colspan="2" class="px-6 py-3.5 text-amber-300 font-extrabold border border-gray-800">
+                                        Sisa Gaji {{ $monthlySalaries[$monthIdx]['month_name'] ?? '' }}
+                                        <span class="text-gray-500 font-normal ml-1">(Gaji − Terbayar)</span>
                                     </td>
-                                    <td class="px-6 py-3.5 text-center font-extrabold border border-gray-800 {{ $monthTotalUnpaid > 0 ? 'text-rose-400' : 'text-emerald-400' }}">
-                                        {{ $monthTotalUnpaid > 0 ? 'Sisa: Rp ' . number_format($monthTotalUnpaid, 0, ',', '.') : 'Lunas' }}
-                                    </td>
-                                    <td class="px-6 py-3.5 text-right text-rose-400 border border-gray-800">
+                                    <td class="px-6 py-3.5 text-right text-rose-400 font-semibold border border-gray-800">
                                         Rp {{ number_format($monthTotalAmount, 0, ',', '.') }}
                                     </td>
-                                    <td class="px-6 py-3.5 text-right text-emerald-400 border border-gray-800">
-                                        Rp {{ number_format($monthTotalPaid, 0, ',', '.') }}
+                                    <td class="px-6 py-3.5 text-right font-extrabold border border-gray-800 {{ $monthRemainder >= 0 ? 'text-amber-400' : 'text-rose-500' }}">
+                                        {{ $monthRemainder < 0 ? '−' : '' }}Rp {{ number_format(abs($monthRemainder), 0, ',', '.') }}
                                     </td>
                                 </tr>
                             @else
