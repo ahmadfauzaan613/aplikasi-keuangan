@@ -130,7 +130,7 @@ new class extends Component {
             $debt->updated_at = $date;
             $debt->save(['timestamps' => false]);
             $this->editingId = null;
-            session()->flash('message', 'Catatan hutang/piutang berhasil diperbarui!');
+            session()->flash('message', 'Catatan hutang berhasil diperbarui!');
         } else {
             $debt = $createAction->execute(auth()->user(), [
                 'name' => $this->name,
@@ -142,7 +142,7 @@ new class extends Component {
             $debt->created_at = $date;
             $debt->updated_at = $date;
             $debt->save(['timestamps' => false]);
-            session()->flash('message', 'Catatan hutang/piutang berhasil ditambahkan!');
+            session()->flash('message', 'Catatan hutang berhasil ditambahkan!');
         }
 
         $this->reset(['name', 'amount', 'description']);
@@ -155,7 +155,7 @@ new class extends Component {
         $debt = auth()->user()->debts()->findOrFail($id);
         $debt->update(['status' => $newStatus]);
 
-        session()->flash('message', 'Status hutang/piutang berhasil diperbarui!');
+        session()->flash('message', 'Status hutang berhasil diperbarui!');
     }
 
     public function delete(string $id): void
@@ -182,14 +182,12 @@ new class extends Component {
 
     public function getStatsProperty(): array
     {
-        $query = auth()->user()->debts();
+        $items = $this->monthlyData[$this->activeMonth] ?? collect();
 
-        $totalPayable = (clone $query)->payable()->unpaid()->sum('amount');
-        $totalReceivable = (clone $query)->receivable()->unpaid()->sum('amount');
+        $totalPayable = collect($items)->where('type', 'payable')->where('status', 'unpaid')->sum('amount');
 
         return [
             'payable' => $totalPayable,
-            'receivable' => $totalReceivable,
         ];
     }
 
@@ -233,7 +231,7 @@ new class extends Component {
             ->whereMonth('transaction_date', $month)
             ->sum('paid_amount');
 
-        return max(0, (float) $income - (float) $totalPaid);
+        return (float) $income - (float) $totalPaid;
     }
 
     public function with(): array
@@ -277,40 +275,29 @@ new class extends Component {
         <div>
             <h3 class="text-lg font-bold text-gray-250 mb-1 flex items-center">
                 <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-                Berkas Hutang & Piutang Tahunan
+                Berkas Hutang Tahunan
             </h3>
-            <p class="text-xs text-gray-550">Menampilkan rekapan hutang dan piutang.</p>
+            <p class="text-xs text-gray-550">Menampilkan rekapan hutang.</p>
         </div>
     </div>
 
     <!-- Stats Cards Summary -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition">
-            <p class="text-indigo-300 text-xs font-extrabold uppercase tracking-wider">Hutang & Piutang {{ $months[$activeMonth] }}</p>
+            <p class="text-indigo-300 text-xs font-extrabold uppercase tracking-wider">Hutang {{ $months[$activeMonth] }}</p>
             <h4 class="text-2xl font-extrabold text-indigo-300 mt-1.5">
                 Rp {{ number_format($activeMonthStats['total'], 0, ',', '.') }}
             </h4>
         </div>
         <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition flex items-center justify-between">
             <div>
-                <p class="text-rose-300 text-xs font-extrabold uppercase tracking-wider">Hutang Saya (Belum Lunas)</p>
+                <p class="text-rose-300 text-xs font-extrabold uppercase tracking-wider">Hutang Belum Lunas {{ $months[$activeMonth] }}</p>
                 <h4 class="text-2xl font-extrabold text-rose-500 mt-1.5">
                     Rp {{ number_format($stats['payable'], 0, ',', '.') }}
                 </h4>
             </div>
             <div class="p-3 bg-rose-950/40 rounded-xl text-rose-455">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.1" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-            </div>
-        </div>
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition flex items-center justify-between">
-            <div>
-                <p class="text-emerald-300 text-xs font-extrabold uppercase tracking-wider">Piutang Orang (Belum Lunas)</p>
-                <h4 class="text-2xl font-extrabold text-emerald-450 mt-1.5">
-                    Rp {{ number_format($stats['receivable'], 0, ',', '.') }}
-                </h4>
-            </div>
-            <div class="p-3 bg-emerald-950/40 rounded-xl text-emerald-455">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.1" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             </div>
         </div>
     </div>
@@ -370,11 +357,15 @@ new class extends Component {
                         <span class="text-xs font-extrabold text-indigo-400">({{ count($monthItems) }} Catatan)</span>
                     </div>
                     <div class="flex items-center gap-4 text-xs">
+                        <span class="text-gray-250 font-extrabold">
+                            Modal (Sisa Gaji):
+                            <span class="ml-1 text-sm font-black px-2 py-0.5 border rounded-lg {{ $billsRemainder >= 0 ? 'text-amber-400 bg-amber-950/40 border-amber-900/30' : 'text-rose-500 bg-rose-950/40 border-rose-900/30' }}">{{ $billsRemainder < 0 ? '−' : '' }}Rp {{ number_format(abs($billsRemainder), 0, ',', '.') }}</span>
+                        </span>
                         <button type="button" wire:click="selectMonthForForm({{ $monthIdx }})" 
                                 @click="showFormModal = true"
                                 class="py-1.5 px-3 bg-indigo-650 hover:bg-indigo-600 text-white text-xs font-black rounded-xl transition active:scale-[0.98] flex items-center gap-1 shadow-md shadow-indigo-900/20 cursor-pointer">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
-                            Catat Hutang/Piutang
+                            Catat Hutang
                         </button>
                     </div>
                 </div>
@@ -384,7 +375,6 @@ new class extends Component {
                         <thead>
                             <tr class="bg-gray-900 border-b border-gray-855 text-xs text-white uppercase font-black tracking-wider">
                                 <th class="px-6 py-3 border border-gray-800">Nama</th>
-                                <th class="px-6 py-3 border border-gray-800 text-center w-36">Tipe</th>
                                 <th class="px-6 py-3 border border-gray-800 text-center w-36">Status</th>
                                 <th class="px-6 py-3 border border-gray-800 text-center w-40">Jatuh Tempo</th>
                                 <th class="px-6 py-3 border border-gray-800 text-right w-48">Nominal</th>
@@ -420,12 +410,6 @@ new class extends Component {
                                                 </div>
                                             </div>
                                         </td>
-                                        <!-- Tipe -->
-                                        <td class="px-6 py-3 text-center border border-gray-800 w-36 font-bold">
-                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-extrabold {{ $item->type === 'payable' ? 'bg-rose-950/40 text-rose-400 border border-rose-900/50' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/50' }}">
-                                                {{ $item->type === 'payable' ? 'Hutang Saya' : 'Piutang Orang' }}
-                                            </span>
-                                        </td>
                                         <!-- Status -->
                                         <td class="px-6 py-3 text-center border border-gray-800 w-36">
                                             <select wire:change="updateStatus('{{ $item->id }}', $event.target.value)" 
@@ -447,19 +431,41 @@ new class extends Component {
                                 <!-- Bottom Row: Total -->
                                 @php
                                     $monthTotalAmount = collect($monthItems)->sum('amount');
+                                    $monthPayableTotal = collect($monthItems)->where('type', 'payable')->where('status', 'unpaid')->sum('amount');
+                                    $sisaModal = $billsRemainder - $monthPayableTotal;
                                 @endphp
                                 <tr class="bg-indigo-950/30 text-xs font-black border-t-2 border-gray-800">
-                                    <td colspan="4" class="px-6 py-3.5 text-indigo-300 font-extrabold border border-gray-800 text-left">
-                                        Total Hutang & Piutang Bulan Ini
+                                    <td colspan="3" class="px-6 py-3.5 text-indigo-300 font-extrabold border border-gray-800 text-left">
+                                        Total Hutang Bulan Ini
                                     </td>
                                     <td class="px-6 py-3.5 text-right text-indigo-300 border border-gray-800">
                                         Rp {{ number_format($monthTotalAmount, 0, ',', '.') }}
                                     </td>
                                 </tr>
+                                <!-- Bottom Row: Modal (Sisa Gaji) -->
+                                <tr class="bg-amber-950/20 text-xs border-t border-gray-800">
+                                    <td colspan="3" class="px-6 py-3.5 text-amber-300 font-extrabold border border-gray-800 text-left">
+                                        Modal (Sisa Gaji)
+                                        <span class="text-gray-500 font-normal ml-1">(Gaji − Tagihan Terbayar)</span>
+                                    </td>
+                                    <td class="px-6 py-3.5 text-right font-extrabold border border-gray-800 {{ $billsRemainder >= 0 ? 'text-amber-400' : 'text-rose-500' }}">
+                                        {{ $billsRemainder < 0 ? '−' : '' }}Rp {{ number_format(abs($billsRemainder), 0, ',', '.') }}
+                                    </td>
+                                </tr>
+                                <!-- Bottom Row: Sisa Modal setelah Hutang -->
+                                <tr class="bg-amber-950/10 text-xs border-t border-gray-800">
+                                    <td colspan="3" class="px-6 py-3.5 text-gray-400 font-extrabold border border-gray-800 text-left">
+                                        Sisa Modal Setelah Hutang
+                                        <span class="text-gray-500 font-normal ml-1">(Modal − Hutang Belum Lunas)</span>
+                                    </td>
+                                    <td class="px-6 py-3.5 text-right font-extrabold border border-gray-800 {{ $sisaModal >= 0 ? 'text-emerald-400' : 'text-rose-500' }}">
+                                        {{ $sisaModal < 0 ? '−' : '' }}Rp {{ number_format(abs($sisaModal), 0, ',', '.') }}
+                                    </td>
+                                </tr>
                             @else
                                 <tr class="text-xs text-gray-550 hover:bg-gray-850/10 transition">
-                                    <td colspan="5" class="px-6 py-6 text-center italic text-gray-400 border border-gray-800">
-                                        - Belum ada catatan hutang/piutang untuk bulan {{ $monthName }} -
+                                    <td colspan="4" class="px-6 py-6 text-center italic text-gray-400 border border-gray-800">
+                                        - Belum ada catatan hutang untuk bulan {{ $monthName }} -
                                     </td>
                                 </tr>
                             @endif
@@ -471,7 +477,7 @@ new class extends Component {
         @endforeach
     </div>
 
-    <!-- Form Modal (Catat Hutang/Piutang Popup) -->
+    <!-- Form Modal (Catat Hutang Popup) -->
     <div class="relative z-40" 
          x-show="showFormModal" 
          @close-modal.window="showFormModal = false"
@@ -488,7 +494,7 @@ new class extends Component {
                     <div class="flex items-center justify-between mb-6">
                         <h3 class="text-lg font-bold text-gray-250 flex items-center">
                             <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                            {{ $editingId ? 'Edit Catatan Hutang/Piutang' : 'Catat Hutang/Piutang' }}
+                            {{ $editingId ? 'Edit Catatan Hutang' : 'Catat Hutang' }}
                         </h3>
                         <button type="button" @click="showFormModal = false" class="text-gray-555 hover:text-gray-350">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -518,21 +524,6 @@ new class extends Component {
                             </select>
                         </div>
 
-                        <!-- Type selection -->
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Jenis Catatan</label>
-                            <div class="grid grid-cols-2 gap-3">
-                                <button type="button" wire:click="$set('type', 'payable')" 
-                                        class="py-2.5 rounded-xl text-xs font-bold text-center border transition-all duration-200 {{ $type === 'payable' ? 'bg-rose-955/20 border-rose-500 text-rose-400 ring-2 ring-rose-500/10' : 'bg-black border-gray-800 text-gray-400 hover:bg-gray-850' }}">
-                                    Hutang Saya
-                                </button>
-                                <button type="button" wire:click="$set('type', 'receivable')" 
-                                        class="py-2.5 rounded-xl text-xs font-bold text-center border transition-all duration-200 {{ $type === 'receivable' ? 'bg-emerald-955/20 border-emerald-500 text-emerald-400 ring-2 ring-emerald-500/10' : 'bg-black border-gray-800 text-gray-400 hover:bg-gray-850' }}">
-                                    Piutang Orang
-                                </button>
-                            </div>
-                        </div>
-
                         <!-- Name -->
                         <div>
                             <label for="debt_name" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nama Orang / Lembaga</label>
@@ -550,11 +541,11 @@ new class extends Component {
                                        class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100">
                             </div>
                             @error('amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                            @if(!$editingId && $billsRemainder > 0)
+                            @if(!$editingId && $billsRemainder != 0)
                                 <p class="text-xs text-gray-500 mt-1.5">
-                                    Sisa tagihan {{ $months[$activeMonth] }}:
-                                    <span class="text-indigo-400 font-semibold">Rp {{ number_format($billsRemainder, 0, ',', '.') }}</span>
-                                    <span class="text-gray-600">(income - tagihan terbayar)</span>
+                                    Modal (Sisa Gaji) {{ $months[$activeMonth] }}:
+                                    <span class="{{ $billsRemainder >= 0 ? 'text-amber-400' : 'text-rose-400' }} font-semibold">{{ $billsRemainder < 0 ? '−' : '' }}Rp {{ number_format(abs($billsRemainder), 0, ',', '.') }}</span>
+                                    <span class="text-gray-600">(gaji − tagihan terbayar)</span>
                                 </p>
                             @endif
                         </div>
@@ -563,7 +554,8 @@ new class extends Component {
                         <div>
                             <label for="debt_due" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Tenggat Waktu / Jatuh Tempo</label>
                             <input wire:model="due_date" type="date" id="debt_due"
-                                   class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100">
+                                   x-on:click="$el.showPicker()"
+                                   class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100 cursor-pointer">
                             @error('due_date') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
                         </div>
 
