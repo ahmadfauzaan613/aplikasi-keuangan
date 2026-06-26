@@ -16,7 +16,9 @@ class Debt extends Model
         'name',
         'type',
         'amount',
+        'paid_amount',
         'due_date',
+        'tenor_months',
         'status',
         'description',
         'user_id',
@@ -26,7 +28,9 @@ class Debt extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'paid_amount' => 'decimal:2',
             'due_date' => 'date',
+            'tenor_months' => 'integer',
         ];
     }
 

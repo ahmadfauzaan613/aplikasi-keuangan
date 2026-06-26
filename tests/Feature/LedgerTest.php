@@ -291,3 +291,85 @@ test('authenticated user can edit static bill details in bills ledger', function
             return $wifi && $wifi->title === 'WiFi Indihome Premium' && $wifi->amount == 400000;
         });
 });
+
+test('authenticated user can update debt amount directly', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $debt = \App\Models\Debt::forceCreate([
+        'user_id' => $user->id,
+        'name' => 'Budi Santoso',
+        'type' => 'payable',
+        'amount' => 1500000,
+        'due_date' => '2026-07-25',
+        'status' => 'unpaid',
+        'description' => 'Pinjam untuk UKT',
+        'created_at' => '2026-06-01 00:00:00',
+    ]);
+
+    Volt::test('finance.debts')
+        ->call('updateAmount', $debt->id, 1200000)
+        ->assertHasNoErrors()
+        ->assertViewHas('monthlyData', function ($data) use ($debt) {
+            $budi = collect($data[6])->firstWhere('id', $debt->id);
+            return $budi && $budi->amount == 1200000;
+        });
+});
+
+test('authenticated user can update debt paid amount directly and it updates status', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $debt = \App\Models\Debt::forceCreate([
+        'user_id' => $user->id,
+        'name' => 'Budi Santoso',
+        'type' => 'payable',
+        'amount' => 1500000,
+        'paid_amount' => 0,
+        'due_date' => '2026-07-25',
+        'status' => 'unpaid',
+        'description' => 'Pinjam untuk UKT',
+        'created_at' => '2026-06-01 00:00:00',
+    ]);
+
+    Volt::test('finance.debts')
+        ->call('updatePaidAmount', $debt->id, 1500000)
+        ->assertHasNoErrors()
+        ->assertViewHas('monthlyData', function ($data) use ($debt) {
+            $budi = collect($data[6])->firstWhere('id', $debt->id);
+            return $budi && $budi->paid_amount == 1500000 && $budi->status === 'paid';
+        });
+});
+
+test('authenticated user can update debt status directly', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $debt = \App\Models\Debt::forceCreate([
+        'user_id' => $user->id,
+        'name' => 'Budi Santoso',
+        'type' => 'payable',
+        'amount' => 1500000,
+        'paid_amount' => 500000,
+        'due_date' => '2026-07-25',
+        'status' => 'unpaid',
+        'description' => 'Pinjam untuk UKT',
+        'created_at' => '2026-06-01 00:00:00',
+    ]);
+
+    Volt::test('finance.debts')
+        ->call('updateStatus', $debt->id, 'paid')
+        ->assertHasNoErrors()
+        ->assertViewHas('monthlyData', function ($data) use ($debt) {
+            $budi = collect($data[6])->firstWhere('id', $debt->id);
+            return $budi && $budi->paid_amount == 1500000 && $budi->status === 'paid';
+        });
+
+    Volt::test('finance.debts')
+        ->call('updateStatus', $debt->id, 'unpaid')
+        ->assertHasNoErrors()
+        ->assertViewHas('monthlyData', function ($data) use ($debt) {
+            $budi = collect($data[6])->firstWhere('id', $debt->id);
+            return $budi && $budi->paid_amount == 0 && $budi->status === 'unpaid';
+        });
+});

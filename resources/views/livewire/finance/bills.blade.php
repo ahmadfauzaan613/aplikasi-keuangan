@@ -31,11 +31,13 @@ new class extends Component {
     public function mount(): void
     {
         $nowIndo = now('Asia/Jakarta');
-        $this->selectedYear = $nowIndo->year;
-        $this->formYear = $nowIndo->year;
-        $this->formMonth = $nowIndo->month;
-        $this->activeMonth = $nowIndo->month;
-        $this->due_date = $nowIndo->format('Y-m-d');
+        $nextMonth = $nowIndo->copy()->addMonth();
+
+        $this->selectedYear = $nextMonth->year;
+        $this->formYear = $nextMonth->year;
+        $this->formMonth = $nextMonth->month;
+        $this->activeMonth = $nextMonth->month;
+        $this->due_date = $nextMonth->format('Y-m-d');
     }
 
     public function getYearsProperty(): array
@@ -246,6 +248,7 @@ new class extends Component {
         $expenses = auth()->user()->transactions()
             ->expense()
             ->whereYear('transaction_date', $this->selectedYear)
+            ->whereMonth('transaction_date', $this->activeMonth)
             ->get();
 
         $totalPaid = 0;
@@ -341,13 +344,13 @@ new class extends Component {
             </h4>
         </div>
         <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition">
-            <p class="text-emerald-300 text-xs font-extrabold uppercase tracking-wider">Sudah Dibayar</p>
+            <p class="text-emerald-300 text-xs font-extrabold uppercase tracking-wider">Sudah Dibayar {{ $months[$activeMonth] }}</p>
             <h4 class="text-2xl font-extrabold text-emerald-400 mt-1.5">
                 Rp {{ number_format($stats['paid'], 0, ',', '.') }}
             </h4>
         </div>
         <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 shadow-md hover:border-gray-700 transition">
-            <p class="text-rose-300 text-xs font-extrabold uppercase tracking-wider">Belum Dibayar</p>
+            <p class="text-rose-300 text-xs font-extrabold uppercase tracking-wider">Belum Dibayar {{ $months[$activeMonth] }}</p>
             <h4 class="text-2xl font-extrabold text-rose-500 mt-1.5">
                 Rp {{ number_format($stats['unpaid'], 0, ',', '.') }}
             </h4>
@@ -422,8 +425,8 @@ new class extends Component {
                     </div>
                 </div>
                 
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse border border-gray-800">
+                <div class="overflow-x-auto pb-4">
+                    <table class="min-w-[950px] w-full text-left border-collapse border border-gray-800">
                         <thead>
                             <tr class="bg-gray-900 border-b border-gray-855 text-xs text-white uppercase font-black tracking-wider">
                                 <th class="px-6 py-3 border border-gray-800">Bayaran</th>
@@ -473,10 +476,11 @@ new class extends Component {
                                         <td class="px-6 py-3 border border-gray-800 whitespace-nowrap w-52">
                                             <div class="relative flex items-center justify-end" wire:key="paid-{{ $item->id }}-{{ $item->paid_amount }}">
                                                 <span class="absolute left-2 text-gray-300 text-[10px]">Rp</span>
-                                                <input type="number" 
-                                                       value="{{ (float) $item->paid_amount }}" 
-                                                       wire:blur="updatePaidAmount('{{ $item->id }}', $event.target.value)"
-                                                       wire:keydown.enter="updatePaidAmount('{{ $item->id }}', $event.target.value)"
+                                                <input type="text" 
+                                                       value="{{ number_format($item->paid_amount, 0, ',', '.') }}" 
+                                                       x-on:input="$event.target.value = $event.target.value.replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')"
+                                                       wire:blur="updatePaidAmount('{{ $item->id }}', $event.target.value.replace(/\./g, ''))"
+                                                       wire:keydown.enter="updatePaidAmount('{{ $item->id }}', $event.target.value.replace(/\./g, ''))"
                                                        class="pl-6 pr-1 w-32 bg-black/60 border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg text-xs font-black text-white text-right py-1 px-1.5" />
                                             </div>
                                         </td>
@@ -574,9 +578,22 @@ new class extends Component {
                         <!-- Amount -->
                         <div>
                             <label for="trx_amount" class="block text-xs font-semibold text-gray-555 uppercase tracking-wider mb-1.5">Nominal (Total Tagihan)</label>
-                            <div class="relative">
-                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-550 text-sm font-semibold">Rp</span>
-                                <input wire:model="amount" type="number" id="trx_amount" placeholder="0" step="0.01" min="0.01"
+                            <div class="relative" x-data="{
+                                raw: @entangle('amount'),
+                                format(val) {
+                                    if (!val) return '';
+                                    return Number(val).toLocaleString('id-ID');
+                                }
+                            }">
+                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-555 text-sm font-semibold">Rp</span>
+                                <input type="text" id="trx_amount" placeholder="0"
+                                       x-init="$watch('raw', val => $el.value = format(val))"
+                                       x-bind:value="format(raw)"
+                                       x-on:input="
+                                           let clean = $event.target.value.replace(/\D/g, '');
+                                           raw = clean ? parseInt(clean) : '';
+                                           $el.value = format(raw);
+                                       "
                                        class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
                             </div>
                             @error('amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
@@ -585,9 +602,22 @@ new class extends Component {
                         <!-- Paid Amount -->
                         <div>
                             <label for="trx_paid_amount" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nominal Yang Sudah Dibayar (Opsional)</label>
-                            <div class="relative">
-                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-550 text-sm font-semibold">Rp</span>
-                                <input wire:model="paid_amount" type="number" id="trx_paid_amount" placeholder="0" step="0.01" min="0"
+                            <div class="relative" x-data="{
+                                raw: @entangle('paid_amount'),
+                                format(val) {
+                                    if (!val) return '';
+                                    return Number(val).toLocaleString('id-ID');
+                                }
+                            }">
+                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-555 text-sm font-semibold">Rp</span>
+                                <input type="text" id="trx_paid_amount" placeholder="0"
+                                       x-init="$watch('raw', val => $el.value = format(val))"
+                                       x-bind:value="format(raw)"
+                                       x-on:input="
+                                           let clean = $event.target.value.replace(/\D/g, '');
+                                           raw = clean ? parseInt(clean) : '';
+                                           $el.value = format(raw);
+                                       "
                                        class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
                             </div>
                             @error('paid_amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror

@@ -13,6 +13,8 @@ new class extends Component {
     public string $amount = '';
     public string $due_date = '';
     public string $description = '';
+    public string $paid_amount = '';
+    public string $tenor_months = '';
 
     // Add Form Date selections
     public int $formMonth = 1;
@@ -28,11 +30,13 @@ new class extends Component {
     public function mount(): void
     {
         $nowIndo = now('Asia/Jakarta');
-        $this->selectedYear = $nowIndo->year;
-        $this->formYear = $nowIndo->year;
-        $this->formMonth = $nowIndo->month;
-        $this->activeMonth = $nowIndo->month;
-        $this->due_date = $nowIndo->addMonth()->format('Y-m-d');
+        $nextMonth = $nowIndo->copy()->addMonth();
+
+        $this->selectedYear = $nextMonth->year;
+        $this->formYear = $nextMonth->year;
+        $this->formMonth = $nextMonth->month;
+        $this->activeMonth = $nextMonth->month;
+        $this->due_date = $nextMonth->copy()->addMonth()->format('Y-m-d');
         // Auto-fill amount dari sisa income - tagihan yang sudah dibayar bulan ini
         $remainder = $this->billsRemainder;
         $this->amount = $remainder > 0 ? (string) $remainder : '';
@@ -76,7 +80,7 @@ new class extends Component {
     public function selectMonthForForm(int $month): void
     {
         $this->editingId = null;
-        $this->reset(['name', 'description']);
+        $this->reset(['name', 'description', 'paid_amount', 'tenor_months']);
         $this->formMonth = $month;
         $this->formYear = $this->selectedYear;
         $this->type = 'payable';
@@ -99,7 +103,9 @@ new class extends Component {
         $this->name = $debt->name;
         $this->type = $debt->type;
         $this->amount = (string) $debt->amount;
+        $this->paid_amount = (string) $debt->paid_amount;
         $this->due_date = $debt->due_date ? $debt->due_date->format('Y-m-d') : '';
+        $this->tenor_months = $debt->tenor_months !== null ? (string) $debt->tenor_months : '';
         $this->description = $debt->description ?: '';
         $this->formMonth = Carbon::parse($debt->created_at)->month;
         $this->formYear = Carbon::parse($debt->created_at)->year;
@@ -107,11 +113,17 @@ new class extends Component {
 
     public function save(CreateDebtAction $createAction): void
     {
+        $amountVal = (float) $this->amount;
+        $paidAmountVal = (float) ($this->paid_amount ?: 0);
+        $statusVal = $paidAmountVal >= $amountVal ? 'paid' : 'unpaid';
+
         $validated = $this->validate([
             'name' => 'required|string|max:255',
             'type' => 'required|in:payable,receivable',
             'amount' => 'required|numeric|min:0.01',
+            'paid_amount' => 'nullable|numeric|min:0',
             'due_date' => 'nullable|date',
+            'tenor_months' => 'nullable|integer|min:0',
             'description' => 'nullable|string|max:500',
             'formMonth' => 'required|integer|between:1,12',
             'formYear' => 'required|integer',
@@ -123,8 +135,11 @@ new class extends Component {
             $debt = auth()->user()->debts()->findOrFail($this->editingId);
             $debt->name = $this->name;
             $debt->type = $this->type;
-            $debt->amount = (float) $this->amount;
+            $debt->amount = $amountVal;
+            $debt->paid_amount = $paidAmountVal;
+            $debt->status = $statusVal;
             $debt->due_date = $this->due_date ?: null;
+            $debt->tenor_months = $this->tenor_months !== '' ? (int) $this->tenor_months : null;
             $debt->description = $this->description ?: null;
             $debt->created_at = $date;
             $debt->updated_at = $date;
@@ -135,17 +150,20 @@ new class extends Component {
             $debt = $createAction->execute(auth()->user(), [
                 'name' => $this->name,
                 'type' => $this->type,
-                'amount' => (float) $this->amount,
+                'amount' => $amountVal,
                 'due_date' => $this->due_date ?: null,
                 'description' => $this->description ?: null,
             ]);
+            $debt->paid_amount = $paidAmountVal;
+            $debt->status = $statusVal;
+            $debt->tenor_months = $this->tenor_months !== '' ? (int) $this->tenor_months : null;
             $debt->created_at = $date;
             $debt->updated_at = $date;
             $debt->save(['timestamps' => false]);
             session()->flash('message', 'Catatan hutang berhasil ditambahkan!');
         }
 
-        $this->reset(['name', 'amount', 'description']);
+        $this->reset(['name', 'amount', 'description', 'paid_amount', 'tenor_months']);
         $this->due_date = now()->addMonth()->format('Y-m-d');
         $this->dispatch('close-modal');
     }
@@ -153,9 +171,53 @@ new class extends Component {
     public function updateStatus(string $id, string $newStatus): void
     {
         $debt = auth()->user()->debts()->findOrFail($id);
-        $debt->update(['status' => $newStatus]);
+        $debt->update([
+            'status' => $newStatus,
+            'paid_amount' => $newStatus === 'paid' ? $debt->amount : 0,
+        ]);
 
         session()->flash('message', 'Status hutang berhasil diperbarui!');
+    }
+
+    public function updateAmount(string $id, $amount): void
+    {
+        $amountVal = max(0.01, (float) $amount);
+        $debt = auth()->user()->debts()->findOrFail($id);
+        
+        $status = $debt->paid_amount >= $amountVal ? 'paid' : 'unpaid';
+
+        $debt->update([
+            'amount' => $amountVal,
+            'status' => $status,
+        ]);
+
+        session()->flash('message', 'Nominal hutang berhasil diperbarui!');
+    }
+
+    public function updatePaidAmount(string $id, $amount): void
+    {
+        $paidAmount = max(0, (float) $amount);
+        $debt = auth()->user()->debts()->findOrFail($id);
+        
+        $status = $paidAmount >= $debt->amount ? 'paid' : 'unpaid';
+
+        $debt->update([
+            'paid_amount' => $paidAmount,
+            'status' => $status,
+        ]);
+
+        session()->flash('message', 'Jumlah terbayar berhasil diperbarui!');
+    }
+
+    public function updateTenorMonths(string $id, $tenor): void
+    {
+        $tenorVal = $tenor === '' ? null : max(0, (int) $tenor);
+        $debt = auth()->user()->debts()->findOrFail($id);
+        $debt->update([
+            'tenor_months' => $tenorVal,
+        ]);
+
+        session()->flash('message', 'Tenor berhasil diperbarui!');
     }
 
     public function delete(string $id): void
@@ -358,7 +420,7 @@ new class extends Component {
                     </div>
                     <div class="flex items-center gap-4 text-xs">
                         <span class="text-gray-250 font-extrabold">
-                            Modal (Sisa Gaji):
+                            Sisa Gaji:
                             <span class="ml-1 text-sm font-black px-2 py-0.5 border rounded-lg {{ $billsRemainder >= 0 ? 'text-amber-400 bg-amber-950/40 border-amber-900/30' : 'text-rose-500 bg-rose-950/40 border-rose-900/30' }}">{{ $billsRemainder < 0 ? '−' : '' }}Rp {{ number_format(abs($billsRemainder), 0, ',', '.') }}</span>
                         </span>
                         <button type="button" wire:click="selectMonthForForm({{ $monthIdx }})" 
@@ -370,14 +432,16 @@ new class extends Component {
                     </div>
                 </div>
                 
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse border border-gray-800">
+                <div class="overflow-x-auto pb-4">
+                    <table class="min-w-[1100px] w-full text-left border-collapse border border-gray-800">
                         <thead>
                             <tr class="bg-gray-900 border-b border-gray-855 text-xs text-white uppercase font-black tracking-wider">
                                 <th class="px-6 py-3 border border-gray-800">Nama</th>
                                 <th class="px-6 py-3 border border-gray-800 text-center w-36">Status</th>
                                 <th class="px-6 py-3 border border-gray-800 text-center w-40">Jatuh Tempo</th>
-                                <th class="px-6 py-3 border border-gray-800 text-right w-48">Nominal</th>
+                                <th class="px-6 py-3 border border-gray-800 text-center w-36">Tenor (Sisa Bulan)</th>
+                                <th class="px-6 py-3 border border-gray-800 text-right w-44">Nominal</th>
+                                <th class="px-6 py-3 border border-gray-800 text-right w-52">Nominal yang sudah dibayar</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-800 bg-black/20">
@@ -413,8 +477,10 @@ new class extends Component {
                                         <!-- Status -->
                                         <td class="px-6 py-3 text-center border border-gray-800 w-36">
                                             <select wire:change="updateStatus('{{ $item->id }}', $event.target.value)" 
-                                                    class="bg-transparent border-0 text-xs font-black p-0.5 focus:ring-0 focus:outline-none cursor-pointer w-full text-center {{ $item->status === 'paid' ? 'text-emerald-400' : 'text-rose-500' }}">
-                                                <option value="unpaid" class="bg-gray-900 text-rose-500 font-semibold" {{ $item->status === 'unpaid' ? 'selected' : '' }}>Belum Lunas</option>
+                                                    class="bg-transparent border-0 text-xs font-black p-0.5 focus:ring-0 focus:outline-none cursor-pointer w-full text-center {{ $item->status === 'paid' ? 'text-emerald-400' : ($item->paid_amount > 0 ? 'text-amber-400' : 'text-rose-500') }}">
+                                                <option value="unpaid" class="bg-gray-900 text-rose-500 font-semibold" {{ $item->status === 'unpaid' ? 'selected' : '' }}>
+                                                    {{ $item->paid_amount > 0 ? 'Belum Lunas (Cicil)' : 'Belum Lunas' }}
+                                                </option>
                                                 <option value="paid" class="bg-gray-900 text-emerald-400 font-semibold" {{ $item->status === 'paid' ? 'selected' : '' }}>Lunas</option>
                                             </select>
                                         </td>
@@ -422,44 +488,62 @@ new class extends Component {
                                         <td class="px-6 py-3 text-center text-gray-300 font-bold border border-gray-800 w-40 whitespace-nowrap">
                                             {{ $item->due_date ? $item->due_date->format('d M Y') : '-' }}
                                         </td>
+                                        <!-- Tenor (Sisa Bulan) -->
+                                        <td class="px-6 py-3 border border-gray-800 w-36 text-center">
+                                            <div class="relative flex items-center justify-center gap-1" wire:key="tenor-{{ $item->id }}-{{ $item->tenor_months }}">
+                                                <input type="number" 
+                                                       value="{{ (int) $item->tenor_months }}" 
+                                                       wire:blur="updateTenorMonths('{{ $item->id }}', $event.target.value)"
+                                                       wire:keydown.enter="updateTenorMonths('{{ $item->id }}', $event.target.value)"
+                                                       class="w-16 bg-black/60 border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg text-xs font-black text-white text-center py-1 px-1.5" />
+                                                <span class="text-gray-400 text-xs">Bulan</span>
+                                            </div>
+                                        </td>
                                         <!-- Nominal -->
-                                        <td class="px-6 py-3 text-right font-black text-white border border-gray-800 whitespace-nowrap w-48">
+                                        <td class="px-6 py-3 text-right font-black text-white border border-gray-800 whitespace-nowrap w-44">
                                             Rp {{ number_format($item->amount, 0, ',', '.') }}
+                                        </td>
+                                        <!-- Nominal yang sudah dibayar -->
+                                        <td class="px-6 py-3 border border-gray-800 whitespace-nowrap w-52">
+                                            <div class="relative flex items-center justify-end" wire:key="paid-{{ $item->id }}-{{ $item->paid_amount }}">
+                                                <span class="absolute left-2 text-gray-300 text-[10px]">Rp</span>
+                                                <input type="text" 
+                                                       value="{{ number_format($item->paid_amount, 0, ',', '.') }}" 
+                                                       x-on:input="$event.target.value = $event.target.value.replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')"
+                                                       wire:blur="updatePaidAmount('{{ $item->id }}', $event.target.value.replace(/\./g, ''))"
+                                                       wire:keydown.enter="updatePaidAmount('{{ $item->id }}', $event.target.value.replace(/\./g, ''))"
+                                                       class="pl-6 pr-1 w-32 bg-black/60 border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg text-xs font-black text-white text-right py-1 px-1.5" />
+                                            </div>
                                         </td>
                                     </tr>
                                 @endforeach
                                 <!-- Bottom Row: Total -->
                                 @php
                                     $monthTotalAmount = collect($monthItems)->sum('amount');
-                                    $monthPayableTotal = collect($monthItems)->where('type', 'payable')->where('status', 'unpaid')->sum('amount');
-                                    $sisaModal = $billsRemainder - $monthPayableTotal;
+                                    $monthTotalPaid = collect($monthItems)->sum('paid_amount');
+                                    $monthPayablePaidTotal = collect($monthItems)->where('type', 'payable')->sum('paid_amount');
+                                    $sisaGajiSetelahHutang = $billsRemainder - $monthPayablePaidTotal;
                                 @endphp
                                 <tr class="bg-indigo-950/30 text-xs font-black border-t-2 border-gray-800">
-                                    <td colspan="3" class="px-6 py-3.5 text-indigo-300 font-extrabold border border-gray-800 text-left">
+                                    <td colspan="4" class="px-6 py-3.5 text-indigo-300 font-extrabold border border-gray-800 text-left">
                                         Total Hutang Bulan Ini
                                     </td>
-                                    <td class="px-6 py-3.5 text-right text-indigo-300 border border-gray-800">
+                                    <td class="px-6 py-3.5 text-right text-indigo-300 border border-gray-800 whitespace-nowrap">
                                         Rp {{ number_format($monthTotalAmount, 0, ',', '.') }}
                                     </td>
-                                </tr>
-                                <!-- Bottom Row: Modal (Sisa Gaji) -->
-                                <tr class="bg-amber-950/20 text-xs border-t border-gray-800">
-                                    <td colspan="3" class="px-6 py-3.5 text-amber-300 font-extrabold border border-gray-800 text-left">
-                                        Modal (Sisa Gaji)
-                                        <span class="text-gray-500 font-normal ml-1">(Gaji − Tagihan Terbayar)</span>
-                                    </td>
-                                    <td class="px-6 py-3.5 text-right font-extrabold border border-gray-800 {{ $billsRemainder >= 0 ? 'text-amber-400' : 'text-rose-500' }}">
-                                        {{ $billsRemainder < 0 ? '−' : '' }}Rp {{ number_format(abs($billsRemainder), 0, ',', '.') }}
+                                    <td class="px-6 py-3.5 text-right text-indigo-300 border border-gray-800 whitespace-nowrap">
+                                        Rp {{ number_format($monthTotalPaid, 0, ',', '.') }}
                                     </td>
                                 </tr>
-                                <!-- Bottom Row: Sisa Modal setelah Hutang -->
+
+                                <!-- Bottom Row: Sisa Gaji Setelah Hutang -->
                                 <tr class="bg-amber-950/10 text-xs border-t border-gray-800">
-                                    <td colspan="3" class="px-6 py-3.5 text-gray-400 font-extrabold border border-gray-800 text-left">
-                                        Sisa Modal Setelah Hutang
-                                        <span class="text-gray-500 font-normal ml-1">(Modal − Hutang Belum Lunas)</span>
+                                    <td colspan="5" class="px-6 py-3.5 text-gray-400 font-extrabold border border-gray-800 text-left">
+                                        Sisa Gaji Setelah Hutang
+                                        <span class="text-gray-550 font-normal ml-1">(Sisa Gaji − Hutang Terbayar)</span>
                                     </td>
-                                    <td class="px-6 py-3.5 text-right font-extrabold border border-gray-800 {{ $sisaModal >= 0 ? 'text-emerald-400' : 'text-rose-500' }}">
-                                        {{ $sisaModal < 0 ? '−' : '' }}Rp {{ number_format(abs($sisaModal), 0, ',', '.') }}
+                                    <td class="px-6 py-3.5 text-right font-extrabold border border-gray-800 {{ $sisaGajiSetelahHutang >= 0 ? 'text-emerald-400' : 'text-rose-500' }} whitespace-nowrap">
+                                        {{ $sisaGajiSetelahHutang < 0 ? '−' : '' }}Rp {{ number_format(abs($sisaGajiSetelahHutang), 0, ',', '.') }}
                                     </td>
                                 </tr>
                             @else
@@ -526,7 +610,7 @@ new class extends Component {
 
                         <!-- Name -->
                         <div>
-                            <label for="debt_name" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nama Orang / Lembaga</label>
+                            <label for="debt_name" class="block text-xs font-semibold text-gray-555 uppercase tracking-wider mb-1.5">Nama Orang / Lembaga</label>
                             <input wire:model="name" type="text" id="debt_name" placeholder="Nama..."
                                    class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100">
                             @error('name') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
@@ -534,20 +618,58 @@ new class extends Component {
 
                         <!-- Amount -->
                         <div>
-                            <label for="debt_amount" class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Jumlah</label>
-                            <div class="relative">
-                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-500 text-sm font-semibold">Rp</span>
-                                <input wire:model="amount" type="number" id="debt_amount" placeholder="0" step="0.01" min="0.01"
-                                       class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-505 focus:border-indigo-505 text-gray-100">
+                            <label for="debt_amount" class="block text-xs font-semibold text-gray-550 uppercase tracking-wider mb-1.5">Jumlah</label>
+                            <div class="relative" x-data="{
+                                raw: @entangle('amount'),
+                                format(val) {
+                                    if (!val) return '';
+                                    return Number(val).toLocaleString('id-ID');
+                                }
+                            }">
+                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-550 text-sm font-semibold">Rp</span>
+                                <input type="text" id="debt_amount" placeholder="0"
+                                       x-init="$watch('raw', val => $el.value = format(val))"
+                                       x-bind:value="format(raw)"
+                                       x-on:input="
+                                           let clean = $event.target.value.replace(/\D/g, '');
+                                           raw = clean ? parseInt(clean) : '';
+                                           $el.value = format(raw);
+                                       "
+                                       class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
                             </div>
                             @error('amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                            @if(!$editingId && $billsRemainder != 0)
-                                <p class="text-xs text-gray-500 mt-1.5">
-                                    Modal (Sisa Gaji) {{ $months[$activeMonth] }}:
-                                    <span class="{{ $billsRemainder >= 0 ? 'text-amber-400' : 'text-rose-400' }} font-semibold">{{ $billsRemainder < 0 ? '−' : '' }}Rp {{ number_format(abs($billsRemainder), 0, ',', '.') }}</span>
-                                    <span class="text-gray-600">(gaji − tagihan terbayar)</span>
-                                </p>
-                            @endif
+                        </div>
+
+                        <!-- Paid Amount -->
+                        <div>
+                            <label for="debt_paid_amount" class="block text-xs font-semibold text-gray-550 uppercase tracking-wider mb-1.5">Nominal Yang Sudah Dibayar (Opsional)</label>
+                            <div class="relative" x-data="{
+                                raw: @entangle('paid_amount'),
+                                format(val) {
+                                    if (!val) return '';
+                                    return Number(val).toLocaleString('id-ID');
+                                }
+                            }">
+                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-550 text-sm font-semibold">Rp</span>
+                                <input type="text" id="debt_paid_amount" placeholder="0"
+                                       x-init="$watch('raw', val => $el.value = format(val))"
+                                       x-bind:value="format(raw)"
+                                       x-on:input="
+                                           let clean = $event.target.value.replace(/\D/g, '');
+                                           raw = clean ? parseInt(clean) : '';
+                                           $el.value = format(raw);
+                                       "
+                                       class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
+                            </div>
+                            @error('paid_amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
+                        </div>
+
+                        <!-- Tenor (Sisa Bulan) -->
+                        <div>
+                            <label for="debt_tenor" class="block text-xs font-semibold text-gray-550 uppercase tracking-wider mb-1.5">Tenor (Sisa Bulan) (Opsional)</label>
+                            <input wire:model="tenor_months" type="number" id="debt_tenor" placeholder="0" min="0"
+                                   class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
+                            @error('tenor_months') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
                         </div>
 
                         <!-- Due Date -->
