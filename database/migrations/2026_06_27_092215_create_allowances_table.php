@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('allowances', function (Blueprint $table) {
             $table->ulid('id')->primary();
-            $table->foreignUlid('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->string('name');
             $table->decimal('amount', 15, 2)->default(0);
             $table->date('allowance_date');
