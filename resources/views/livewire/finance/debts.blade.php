@@ -36,10 +36,8 @@ new class extends Component {
         $this->formYear = $nextMonth->year;
         $this->formMonth = $nextMonth->month;
         $this->activeMonth = $nextMonth->month;
-        $this->due_date = $nextMonth->copy()->addMonth()->format('Y-m-d');
-        // Auto-fill amount dari sisa income - tagihan yang sudah dibayar bulan ini
-        $remainder = $this->billsRemainder;
-        $this->amount = $remainder > 0 ? (string) $remainder : '';
+        $this->due_date = $nextMonth->format('Y-m-d');
+        $this->amount = '0';
     }
 
     public function getYearsProperty(): array
@@ -84,10 +82,8 @@ new class extends Component {
         $this->formMonth = $month;
         $this->formYear = $this->selectedYear;
         $this->type = 'payable';
-        $this->due_date = Carbon::create($this->selectedYear, $month, 1)->addMonth()->format('Y-m-d');
-        // Auto-fill amount dari sisa income - tagihan yang sudah dibayar
-        $remainder = $this->billsRemainder;
-        $this->amount = $remainder > 0 ? (string) $remainder : '';
+        $this->due_date = Carbon::create($this->selectedYear, $month, 1)->format('Y-m-d');
+        $this->amount = '0';
     }
 
     public function setActiveMonth(int $month): void
@@ -164,7 +160,7 @@ new class extends Component {
         }
 
         $this->reset(['name', 'amount', 'description', 'paid_amount', 'tenor_months']);
-        $this->due_date = now()->addMonth()->format('Y-m-d');
+        $this->due_date = now('Asia/Jakarta')->addMonth()->format('Y-m-d');
         $this->dispatch('close-modal');
     }
 
@@ -439,14 +435,19 @@ new class extends Component {
                                 <th class="px-6 py-3 border border-gray-800">Nama</th>
                                 <th class="px-6 py-3 border border-gray-800 text-center w-36">Status</th>
                                 <th class="px-6 py-3 border border-gray-800 text-center w-40">Jatuh Tempo</th>
-                                <th class="px-6 py-3 border border-gray-800 text-center w-36">Tenor (Sisa Bulan)</th>
                                 <th class="px-6 py-3 border border-gray-800 text-right w-44">Nominal</th>
+                                <th class="px-6 py-3 border border-gray-800 text-right w-44">Sisa Gaji</th>
                                 <th class="px-6 py-3 border border-gray-800 text-right w-52">Nominal yang sudah dibayar</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-800 bg-black/20">
                             @if(count($monthItems) > 0)
+                                @php $runningGaji = $billsRemainder; @endphp
                                 @foreach($monthItems as $item)
+                                @php
+                                    $sisaGajiRow = $runningGaji - $item->amount;
+                                    $runningGaji = $sisaGajiRow;
+                                @endphp
                                     <tr class="hover:bg-gray-850/30 text-xs transition group">
                                         <!-- Nama -->
                                         <td class="px-6 py-3 font-bold text-white border border-gray-800">
@@ -488,20 +489,13 @@ new class extends Component {
                                         <td class="px-6 py-3 text-center text-gray-300 font-bold border border-gray-800 w-40 whitespace-nowrap">
                                             {{ $item->due_date ? $item->due_date->format('d M Y') : '-' }}
                                         </td>
-                                        <!-- Tenor (Sisa Bulan) -->
-                                        <td class="px-6 py-3 border border-gray-800 w-36 text-center">
-                                            <div class="relative flex items-center justify-center gap-1" wire:key="tenor-{{ $item->id }}-{{ $item->tenor_months }}">
-                                                <input type="number" 
-                                                       value="{{ (int) $item->tenor_months }}" 
-                                                       wire:blur="updateTenorMonths('{{ $item->id }}', $event.target.value)"
-                                                       wire:keydown.enter="updateTenorMonths('{{ $item->id }}', $event.target.value)"
-                                                       class="w-16 bg-black/60 border border-gray-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg text-xs font-black text-white text-center py-1 px-1.5" />
-                                                <span class="text-gray-400 text-xs">Bulan</span>
-                                            </div>
-                                        </td>
                                         <!-- Nominal -->
                                         <td class="px-6 py-3 text-right font-black text-white border border-gray-800 whitespace-nowrap w-44">
                                             Rp {{ number_format($item->amount, 0, ',', '.') }}
+                                        </td>
+                                        <!-- Sisa Gaji -->
+                                        <td class="px-6 py-3 text-right font-black border border-gray-800 whitespace-nowrap w-44 {{ $sisaGajiRow >= 0 ? 'text-amber-400' : 'text-rose-500' }}">
+                                            {{ $sisaGajiRow < 0 ? '−' : '' }}Rp {{ number_format(abs($sisaGajiRow), 0, ',', '.') }}
                                         </td>
                                         <!-- Nominal yang sudah dibayar -->
                                         <td class="px-6 py-3 border border-gray-800 whitespace-nowrap w-52">
@@ -521,34 +515,33 @@ new class extends Component {
                                 @php
                                     $monthTotalAmount = collect($monthItems)->sum('amount');
                                     $monthTotalPaid = collect($monthItems)->sum('paid_amount');
-                                    $monthPayablePaidTotal = collect($monthItems)->where('type', 'payable')->sum('paid_amount');
-                                    $sisaGajiSetelahHutang = $billsRemainder - $monthPayablePaidTotal;
                                 @endphp
                                 <tr class="bg-indigo-950/30 text-xs font-black border-t-2 border-gray-800">
-                                    <td colspan="4" class="px-6 py-3.5 text-indigo-300 font-extrabold border border-gray-800 text-left">
+                                    <td colspan="3" class="px-6 py-3.5 text-indigo-300 font-extrabold border border-gray-800 text-left">
                                         Total Hutang Bulan Ini
                                     </td>
                                     <td class="px-6 py-3.5 text-right text-indigo-300 border border-gray-800 whitespace-nowrap">
                                         Rp {{ number_format($monthTotalAmount, 0, ',', '.') }}
                                     </td>
+                                    <td class="px-6 py-3.5 border border-gray-800"></td>
                                     <td class="px-6 py-3.5 text-right text-indigo-300 border border-gray-800 whitespace-nowrap">
                                         Rp {{ number_format($monthTotalPaid, 0, ',', '.') }}
                                     </td>
                                 </tr>
 
-                                <!-- Bottom Row: Sisa Gaji Setelah Hutang -->
+                                <!-- Bottom Row: Sisa Gaji Keseluruhan -->
                                 <tr class="bg-amber-950/10 text-xs border-t border-gray-800">
-                                    <td colspan="5" class="px-6 py-3.5 text-gray-400 font-extrabold border border-gray-800 text-left">
-                                        Sisa Gaji Setelah Hutang
-                                        <span class="text-gray-550 font-normal ml-1">(Sisa Gaji − Hutang Terbayar)</span>
+                                    <td colspan="4" class="px-6 py-3.5 text-gray-400 font-extrabold border border-gray-800 text-left">
+                                        Sisa Gaji Keseluruhan
                                     </td>
-                                    <td class="px-6 py-3.5 text-right font-extrabold border border-gray-800 {{ $sisaGajiSetelahHutang >= 0 ? 'text-emerald-400' : 'text-rose-500' }} whitespace-nowrap">
-                                        {{ $sisaGajiSetelahHutang < 0 ? '−' : '' }}Rp {{ number_format(abs($sisaGajiSetelahHutang), 0, ',', '.') }}
+                                    <td class="px-6 py-3.5 text-right font-extrabold border border-gray-800 {{ $runningGaji >= 0 ? 'text-emerald-400' : 'text-rose-500' }} whitespace-nowrap">
+                                        {{ $runningGaji < 0 ? '−' : '' }}Rp {{ number_format(abs($runningGaji), 0, ',', '.') }}
                                     </td>
+                                    <td class="px-6 py-3.5 border border-gray-800"></td>
                                 </tr>
                             @else
                                 <tr class="text-xs text-gray-550 hover:bg-gray-850/10 transition">
-                                    <td colspan="4" class="px-6 py-6 text-center italic text-gray-400 border border-gray-800">
+                                    <td colspan="6" class="px-6 py-6 text-center italic text-gray-400 border border-gray-800">
                                         - Belum ada catatan hutang untuk bulan {{ $monthName }} -
                                     </td>
                                 </tr>
@@ -662,14 +655,6 @@ new class extends Component {
                                        class="pl-10 w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
                             </div>
                             @error('paid_amount') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
-                        </div>
-
-                        <!-- Tenor (Sisa Bulan) -->
-                        <div>
-                            <label for="debt_tenor" class="block text-xs font-semibold text-gray-550 uppercase tracking-wider mb-1.5">Tenor (Sisa Bulan) (Opsional)</label>
-                            <input wire:model="tenor_months" type="number" id="debt_tenor" placeholder="0" min="0"
-                                   class="w-full text-sm py-2.5 px-4 bg-black border border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-100">
-                            @error('tenor_months') <span class="text-xs text-rose-500 mt-1 block">{{ $message }}</span> @enderror
                         </div>
 
                         <!-- Due Date -->

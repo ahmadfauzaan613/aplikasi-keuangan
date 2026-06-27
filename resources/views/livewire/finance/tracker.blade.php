@@ -1,7 +1,7 @@
 <?php
 
 use App\Models\Transaction;
-use App\Models\Debt;
+use App\Models\ActiveDebt;
 use App\Actions\CreateTransactionAction;
 use App\Actions\DeleteTransactionAction;
 use Livewire\Volt\Component;
@@ -78,7 +78,7 @@ new class extends Component {
 
     public function editDebt(string $id): void
     {
-        $debt = auth()->user()->debts()->findOrFail($id);
+        $debt = auth()->user()->activeDebts()->findOrFail($id);
         $this->editingDebtId = $debt->id;
         $this->debtName = $debt->name;
         $this->debtType = $debt->type;
@@ -106,7 +106,7 @@ new class extends Component {
         $statusVal = $paidAmountVal >= $amountVal ? 'paid' : 'unpaid';
 
         if ($this->editingDebtId) {
-            $debt = auth()->user()->debts()->findOrFail($this->editingDebtId);
+            $debt = auth()->user()->activeDebts()->findOrFail($this->editingDebtId);
             $debt->update([
                 'name' => $this->debtName,
                 'type' => $this->debtType,
@@ -119,15 +119,27 @@ new class extends Component {
             ]);
             $this->editingDebtId = null;
             session()->flash('message', 'Catatan hutang berhasil diperbarui!');
+        } else {
+            auth()->user()->activeDebts()->create([
+                'name' => $this->debtName,
+                'type' => $this->debtType,
+                'amount' => $amountVal,
+                'paid_amount' => $paidAmountVal,
+                'status' => $statusVal,
+                'due_date' => $this->debtDueDate ?: null,
+                'tenor_months' => $this->debtTenorMonths !== '' ? (int) $this->debtTenorMonths : null,
+                'description' => $this->debtDescription ?: null,
+            ]);
+            session()->flash('message', 'Catatan hutang berhasil ditambahkan!');
         }
-        
+
         $this->reset(['debtName', 'debtAmount', 'debtPaidAmount', 'debtDescription', 'debtDueDate', 'debtTenorMonths']);
         $this->dispatch('close-modal');
     }
 
     public function deleteDebt(string $id): void
     {
-        $debt = auth()->user()->debts()->findOrFail($id);
+        $debt = auth()->user()->activeDebts()->findOrFail($id);
         $debt->delete();
 
         session()->flash('message', 'Catatan hutang berhasil dihapus!');
@@ -136,7 +148,7 @@ new class extends Component {
     public function updatePaidAmount(string $id, $amount): void
     {
         $paidAmount = max(0, (float) $amount);
-        $debt = auth()->user()->debts()->findOrFail($id);
+        $debt = auth()->user()->activeDebts()->findOrFail($id);
         
         $status = $paidAmount >= $debt->amount ? 'paid' : 'unpaid';
 
@@ -151,7 +163,7 @@ new class extends Component {
     public function updateTenorMonths(string $id, $tenor): void
     {
         $tenorVal = $tenor === '' ? null : max(0, (int) $tenor);
-        $debt = auth()->user()->debts()->findOrFail($id);
+        $debt = auth()->user()->activeDebts()->findOrFail($id);
         $debt->update([
             'tenor_months' => $tenorVal,
         ]);
@@ -161,7 +173,7 @@ new class extends Component {
 
     public function updateStatus(string $id, string $newStatus): void
     {
-        $debt = auth()->user()->debts()->findOrFail($id);
+        $debt = auth()->user()->activeDebts()->findOrFail($id);
         $debt->update([
             'status' => $newStatus,
             'paid_amount' => $newStatus === 'paid' ? $debt->amount : 0,
@@ -177,14 +189,14 @@ new class extends Component {
 
     public function with(): array
     {
-        $debts = auth()->user()->debts()
+        $debts = auth()->user()->activeDebts()
             ->orderBy('due_date', 'asc')
             ->orderBy('created_at', 'desc')
             ->get();
 
         // Calculate summary stats for the cards
-        $totalPayable = auth()->user()->debts()->payable()->where('status', 'unpaid')->get()->sum(fn($d) => $d->amount - $d->paid_amount);
-        $totalReceivable = auth()->user()->debts()->receivable()->where('status', 'unpaid')->get()->sum(fn($d) => $d->amount - $d->paid_amount);
+        $totalPayable = auth()->user()->activeDebts()->payable()->where('status', 'unpaid')->get()->sum(fn($d) => $d->amount - $d->paid_amount);
+        $totalReceivable = auth()->user()->activeDebts()->receivable()->where('status', 'unpaid')->get()->sum(fn($d) => $d->amount - $d->paid_amount);
 
         return [
             'debts' => $debts,
@@ -253,10 +265,11 @@ new class extends Component {
             </div>
             
             <div class="flex items-center gap-3">
-                <a href="/debts" class="py-2 px-4 bg-indigo-650 hover:bg-indigo-600 text-white text-xs font-black rounded-xl transition active:scale-[0.98] flex items-center gap-1.5 shadow-md shadow-indigo-900/20">
+                <button type="button" @click="showFormModal = true"
+                        class="py-2 px-4 bg-indigo-650 hover:bg-indigo-600 text-white text-xs font-black rounded-xl transition active:scale-[0.98] flex items-center gap-1.5 shadow-md shadow-indigo-900/20">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
-                    Kelola / Catat Baru
-                </a>
+                    Catat Baru
+                </button>
             </div>
         </div>
 
@@ -403,7 +416,7 @@ new class extends Component {
                     <div class="flex items-center justify-between mb-6">
                         <h3 class="text-lg font-bold text-gray-250 flex items-center">
                             <svg class="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                            Edit Catatan Hutang / Piutang
+                            {{ $editingDebtId ? 'Edit Catatan' : 'Catat Hutang / Piutang' }}
                         </h3>
                         <button type="button" @click="showFormModal = false" class="text-gray-555 hover:text-gray-350">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -510,7 +523,7 @@ new class extends Component {
                         <!-- Submit Button -->
                         <button type="submit" 
                                 class="w-full py-3 bg-indigo-600 hover:bg-indigo-750 text-white text-sm font-bold rounded-xl shadow-md transition-all duration-150 active:scale-[0.98]">
-                            Simpan Perubahan
+                            {{ $editingDebtId ? 'Simpan Perubahan' : 'Tambah Catatan' }}
                         </button>
                     </form>
                 </div>
